@@ -165,6 +165,17 @@ export function createAssistantPanel(
             );
           }
         },
+        toggleViewport() {
+          if (this.viewportAttached) {
+            this.viewportAttached = false;
+            Blockbench.showQuickMessage(
+              "Viewport removed from the next message.",
+              1600,
+            );
+          } else {
+            void this.capture();
+          }
+        },
         async stop() {
           const bridge = settings();
           if (bridge && this.sessionId) await stopChat(bridge, this.sessionId);
@@ -205,8 +216,8 @@ export function createAssistantPanel(
             <article v-for="(message,index) in messages" :key="index" class="bcs-message" :class="message.role"><div class="bcs-message-heading"><b>{{ message.role==='you'?'You':message.role==='error'?'Error':'Codex' }}</b><button v-if="message.role==='codex'" title="Copy message" @click="copyMessage(message.text)"><span class="material-icons">content_copy</span></button></div><p>{{ message.text }}</p></article>
             <details v-if="toolEvents.length" class="bcs-events" :open="showDetails" @toggle="showDetails=$event.target.open"><summary><span class="material-icons">account_tree</span>{{ toolEvents.length }} MCP events</summary><div v-for="event in toolEvents" :key="event.id"><span>{{ eventLabel(event) }}</span><pre v-if="showDetails">{{ JSON.stringify(event.detail,null,2) }}</pre></div></details>
           </main>
-          <section class="bcs-context"><div class="bcs-chips"><span v-for="item in selection.slice(0,4)" :key="item.uuid" class="bcs-chip"><span class="material-icons">check_box</span>{{ item.name }}</span><span v-if="selection.length>4" class="bcs-chip">+{{ selection.length-4 }}</span><span v-if="viewportAttached" class="bcs-chip accent"><span class="material-icons">photo_camera</span>Viewport</span></div><div class="bcs-toolbar"><button @click="capture" title="Capture viewport"><span class="material-icons">photo_camera</span></button><label><input type="checkbox" v-model="previewFirst"> Preview first</label><select v-model="model" :disabled="working" @mousedown="modelMenuOpen=true" @change="modelMenuOpen=false" @blur="modelMenuOpen=false"><option value="gpt-5.6-sol">{{ modelMenuOpen ? 'Sol · Quality' : 'Sol' }}</option><option value="gpt-5.6-terra">{{ modelMenuOpen ? 'Terra · Balanced' : 'Terra' }}</option><option value="gpt-5.6-luna">{{ modelMenuOpen ? 'Luna · Fast' : 'Luna' }}</option></select></div></section>
-          <footer class="bcs-composer"><textarea v-model="prompt" :disabled="working" @keydown.enter.exact.prevent="send" placeholder="Describe what to build or change…"></textarea><button v-if="working" class="bcs-send stop" @click="stop" title="Stop"><span class="material-icons">stop</span></button><button v-else class="bcs-send" @click="send" :disabled="!prompt.trim()||!connected" title="Send"><span class="material-icons">arrow_upward</span></button><button class="bcs-undo" @click="undo"><span class="material-icons">undo</span> Undo</button></footer>
+          <section class="bcs-context"><div class="bcs-chips"><span v-for="item in selection.slice(0,4)" :key="item.uuid" class="bcs-chip"><span class="material-icons">check_box</span>{{ item.name }}</span><span v-if="selection.length>4" class="bcs-chip">+{{ selection.length-4 }}</span><span v-if="viewportAttached" class="bcs-chip accent"><span class="material-icons">photo_camera</span>Viewport</span></div><div class="bcs-toolbar"><label><input type="checkbox" v-model="previewFirst"> Preview first</label><select v-model="model" :disabled="working" @mousedown="modelMenuOpen=true" @change="modelMenuOpen=false" @blur="modelMenuOpen=false"><option value="gpt-5.6-sol">{{ modelMenuOpen ? 'Sol · Quality' : 'Sol' }}</option><option value="gpt-5.6-terra">{{ modelMenuOpen ? 'Terra · Balanced' : 'Terra' }}</option><option value="gpt-5.6-luna">{{ modelMenuOpen ? 'Luna · Fast' : 'Luna' }}</option></select></div></section>
+          <footer class="bcs-composer"><textarea v-model="prompt" :disabled="working" @keydown.enter.exact.prevent="send" placeholder="Describe what to build or change…"></textarea><button class="bcs-attach" :class="{active:viewportAttached}" @click="toggleViewport" :disabled="working" :title="viewportAttached?'Remove attached viewport':'Attach current viewport'"><span class="material-icons">{{ viewportAttached ? 'close' : 'photo_camera' }}</span></button><button v-if="working" class="bcs-send stop" @click="stop" title="Stop"><span class="material-icons">stop</span></button><button v-else class="bcs-send" @click="send" :disabled="!prompt.trim()||!connected" title="Send"><span class="material-icons">arrow_upward</span></button><button class="bcs-undo" @click="undo"><span class="material-icons">undo</span> Undo</button></footer>
         </div>`,
     } as any,
   });
@@ -217,6 +228,10 @@ export function createAssistantPanel(
     .bcs-shell .bcs-header-actions button{box-sizing:border-box!important;min-width:24px!important;width:24px!important;max-width:24px!important;height:26px!important;margin:0!important;padding:0!important}
     .bcs-shell .bcs-send{box-sizing:border-box!important;display:flex!important;align-items:center!important;justify-content:center!important;min-width:20px!important;width:20px!important;max-width:20px!important;min-height:20px!important;height:20px!important;margin:0!important;padding:0!important;border:0!important;border-radius:50%!important;box-shadow:none!important}
     .bcs-shell .bcs-send .material-icons{display:block;font-size:13px!important;line-height:1!important;margin:0!important}
+    .bcs-shell .bcs-attach{position:absolute;right:40px;top:17px;box-sizing:border-box!important;display:flex!important;align-items:center!important;justify-content:center!important;min-width:20px!important;width:20px!important;max-width:20px!important;min-height:20px!important;height:20px!important;margin:0!important;padding:0!important;border:0!important;border-radius:50%!important;background:transparent!important;opacity:.58}
+    .bcs-shell .bcs-attach:hover,.bcs-shell .bcs-attach.active{opacity:1;background:var(--color-button)!important}
+    .bcs-shell .bcs-attach .material-icons{font-size:13px!important;line-height:1!important}
+    .bcs-shell .bcs-composer textarea{padding-right:58px}
     .bcs-shell{box-sizing:border-box!important;width:100%!important;height:100%!important;max-height:100%!important;min-height:0!important;overflow-x:hidden!important;overflow-y:auto!important;scrollbar-gutter:stable}
     .bcs-shell .bcs-timeline{box-sizing:border-box!important;flex:0 0 auto!important;height:180px;min-height:56px!important;max-height:70vh;resize:vertical;overflow-x:hidden!important;overflow-y:auto!important;overscroll-behavior:contain;scrollbar-gutter:stable;border-bottom:3px solid transparent}
     .bcs-shell .bcs-events{flex:none;max-width:100%;overflow:hidden}
