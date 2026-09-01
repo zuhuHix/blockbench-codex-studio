@@ -20,6 +20,8 @@ export function createAssistantPanel(
   const panel = new Panel("blockbench_codex_assistant", {
     name: "Codex Studio",
     icon: "smart_toy",
+    growable: true,
+    resizable: true,
     default_position: {
       slot: "right_bar",
       float_position: [80, 60],
@@ -42,7 +44,6 @@ export function createAssistantPanel(
           previewFirst: true,
           viewportAttached: false,
           poller: undefined as ReturnType<typeof setInterval> | undefined,
-          panelResizeObserver: undefined as ResizeObserver | undefined,
         };
       },
       computed: {
@@ -61,46 +62,11 @@ export function createAssistantPanel(
       async mounted() {
         await this.newChat(false);
         this.poller = setInterval(() => void this.pollEvents(), 600);
-        requestAnimationFrame(() => this.observePanelSize());
       },
       beforeDestroy() {
         if (this.poller) clearInterval(this.poller);
-        this.panelResizeObserver?.disconnect();
       },
       methods: {
-        observePanelSize() {
-          const shell = this.$el as HTMLElement;
-          let host = shell.closest(".panel") as HTMLElement | null;
-          if (!host) {
-            let candidate = shell.parentElement;
-            while (candidate) {
-              if (
-                candidate.clientHeight > shell.clientHeight + 24 &&
-                Math.abs(candidate.clientWidth - shell.clientWidth) < 20
-              ) {
-                host = candidate;
-                break;
-              }
-              candidate = candidate.parentElement;
-            }
-          }
-          if (!host) return;
-          const resize = () => {
-            const shellTop = shell.getBoundingClientRect().top;
-            const hostBottom = host!.getBoundingClientRect().bottom;
-            const available = Math.max(180, Math.floor(hostBottom - shellTop));
-            shell.style.setProperty("height", `${available}px`, "important");
-            shell.style.setProperty(
-              "max-height",
-              `${available}px`,
-              "important",
-            );
-          };
-          resize();
-          this.panelResizeObserver?.disconnect();
-          this.panelResizeObserver = new ResizeObserver(resize);
-          this.panelResizeObserver.observe(host);
-        },
         async newChat(notify = true) {
           const bridge = settings();
           if (!bridge) {
@@ -274,9 +240,6 @@ export function createAssistantPanel(
     .bcs-shell>.bcs-timeline{align-self:stretch!important;width:100%!important;flex-grow:1!important;flex-shrink:1!important}
     .bcs-shell>.bcs-composer{margin-top:auto}
     .bcs-shell .bcs-welcome{box-sizing:border-box;width:100%;padding:10px 4px}
-    :is(.panel_content,.vue_component,.panel_vue_wrapper):has(.bcs-shell){box-sizing:border-box!important;display:flex!important;flex-direction:column!important;height:100%!important;min-height:0!important;max-height:100%!important;overflow:hidden!important}
-    :is(.panel_content,.vue_component,.panel_vue_wrapper):has(.bcs-shell)>:has(.bcs-shell){display:flex!important;flex:1 1 auto!important;flex-direction:column!important;height:auto!important;min-height:0!important}
-    :is(.panel_content,.vue_component,.panel_vue_wrapper):has(.bcs-shell)>.bcs-shell{flex:1 1 auto!important;height:auto!important;min-height:0!important;max-height:none!important}
     .bcs-shell{box-sizing:border-box!important;width:100%!important;height:100%!important;max-height:100%!important;min-height:0!important;overflow-x:hidden!important;overflow-y:auto!important;scrollbar-gutter:stable}
     .bcs-shell .bcs-timeline{box-sizing:border-box!important;flex:1 1 180px!important;height:auto!important;min-height:56px!important;max-height:none!important;resize:none;overflow-x:hidden!important;overflow-y:auto!important;overscroll-behavior:contain;scrollbar-gutter:stable}
     .bcs-shell .bcs-events{flex:none;max-width:100%;overflow:hidden}
