@@ -201,6 +201,9 @@ export function createAssistantPanel(
     .bcs-shell .bcs-header-actions button{box-sizing:border-box!important;min-width:24px!important;width:24px!important;max-width:24px!important;height:26px!important;margin:0!important;padding:0!important}
     .bcs-shell .bcs-send{box-sizing:border-box!important;display:flex!important;align-items:center!important;justify-content:center!important;min-width:20px!important;width:20px!important;max-width:20px!important;min-height:20px!important;height:20px!important;margin:0!important;padding:0!important;border:0!important;border-radius:50%!important;box-shadow:none!important}
     .bcs-shell .bcs-send .material-icons{display:block;font-size:13px!important;line-height:1!important;margin:0!important}
+    .bcs-shell{box-sizing:border-box!important;width:100%!important;height:100%!important;max-height:100%!important;min-height:0!important;overflow:hidden!important}
+    .bcs-shell .bcs-timeline{box-sizing:border-box!important;flex:1 1 0!important;height:0!important;min-height:0!important;overflow-x:hidden!important;overflow-y:auto!important;overscroll-behavior:contain;scrollbar-gutter:stable}
+    .bcs-shell .bcs-events{flex:none;max-width:100%;overflow:hidden}
   `);
   return { panel, styles };
 }
