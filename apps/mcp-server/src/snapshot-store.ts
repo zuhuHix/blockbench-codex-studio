@@ -10,7 +10,10 @@ export class SnapshotStore {
   }
 
   set(snapshot: BlockbenchSnapshot, receivedAt = Date.now()): void {
-    this.#snapshot = snapshot;
+    this.#snapshot =
+      snapshot.viewport === undefined && this.#snapshot?.viewport !== undefined
+        ? { ...snapshot, viewport: this.#snapshot.viewport }
+        : snapshot;
     this.#receivedAt = receivedAt;
   }
 

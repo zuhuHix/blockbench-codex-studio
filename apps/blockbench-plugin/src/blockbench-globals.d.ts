@@ -4,8 +4,8 @@ interface BlockbenchNode {
   readonly type?: string;
   readonly children?: readonly BlockbenchNode[];
   readonly parent?: BlockbenchNode | "root";
-  readonly from?: readonly [number, number, number];
-  readonly to?: readonly [number, number, number];
+  from?: number[];
+  to?: number[];
   readonly rotation?: readonly [number, number, number];
   readonly visibility?: boolean;
 }
@@ -49,6 +49,20 @@ declare const Project:
     }
   | undefined;
 declare const Cube: { readonly all: readonly BlockbenchNode[] };
+declare const Undo: {
+  initEdit(options: { elements: readonly BlockbenchNode[] }): void;
+  finishEdit(
+    label: string,
+    options: { elements: readonly BlockbenchNode[] },
+  ): void;
+  cancelEdit(revert?: boolean): void;
+};
+declare const Canvas: {
+  updateView(options: {
+    elements: readonly BlockbenchNode[];
+    element_aspects: { geometry: boolean; transform: boolean };
+  }): void;
+};
 declare const Outliner: {
   readonly root: readonly BlockbenchNode[];
   readonly selected: readonly BlockbenchNode[];

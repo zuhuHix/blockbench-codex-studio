@@ -1,12 +1,16 @@
 import type { Server } from "node:http";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { createMcpExpressApp } from "@modelcontextprotocol/sdk/server/express.js";
-import { blockbenchSnapshotSchema } from "@blockbench-codex/contracts";
+import {
+  blockbenchSnapshotSchema,
+  commandAcknowledgementSchema,
+} from "@blockbench-codex/contracts";
 import type { Express } from "express";
 
 import { createBearerAuth } from "./auth.js";
 import { createMcpServer } from "./mcp.js";
 import { SnapshotStore } from "./snapshot-store.js";
+import { DraftStore } from "./draft-store.js";
 
 export interface StudioServerOptions {
   readonly token: string;
@@ -30,6 +34,7 @@ export function createStudioApp(
 ): Express {
   const app = createMcpExpressApp({ host: "127.0.0.1" });
   const authenticate = createBearerAuth(token);
+  const drafts = new DraftStore();
 
   app.get("/health", authenticate, (_request, response) => {
     response.json({ server: "ok", blockbench: store.status() });
@@ -48,8 +53,22 @@ export function createStudioApp(
     response.status(202).json({ accepted: true });
   });
 
+  app.get("/bridge/commands", authenticate, (_request, response) => {
+    response.json({ commands: drafts.pending() });
+  });
+
+  app.post("/bridge/commands/ack", authenticate, (request, response) => {
+    const parsed = commandAcknowledgementSchema.safeParse(request.body);
+    if (!parsed.success) {
+      response.status(400).json({ error: "Invalid command acknowledgement." });
+      return;
+    }
+    drafts.acknowledge(parsed.data.commandId);
+    response.status(202).json({ accepted: true });
+  });
+
   app.post("/mcp", authenticate, async (request, response) => {
-    const server = createMcpServer(store);
+    const server = createMcpServer(store, drafts);
     const transport = new StreamableHTTPServerTransport({
       sessionIdGenerator: undefined,
     });

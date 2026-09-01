@@ -4,11 +4,13 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "prebuild": "npm run build -w @blockbench-codex/geometry",
     "build": "tsc -p tsconfig.json",
     "start": "node dist/cli.js"
   },
   "dependencies": {
     "@blockbench-codex/contracts": "*",
+    "@blockbench-codex/geometry": "*",
     "@modelcontextprotocol/sdk": "^1.30.0",
     "express": "^5.1.0",
     "zod": "^4.5.4"

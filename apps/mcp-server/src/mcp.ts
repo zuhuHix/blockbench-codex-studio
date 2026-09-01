@@ -2,6 +2,16 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { BlockbenchSnapshot } from "@blockbench-codex/contracts";
 
 import type { SnapshotStore } from "./snapshot-store.js";
+import type { DraftStore } from "./draft-store.js";
+import {
+  bounds3Schema,
+  transactionIdSchema,
+} from "@blockbench-codex/contracts";
+import { z } from "zod";
+import {
+  inspectConnectivity,
+  layoutConnectedChain,
+} from "@blockbench-codex/geometry";
 
 function jsonContent(value: unknown) {
   return {
@@ -19,7 +29,10 @@ function requireSnapshot(store: SnapshotStore): BlockbenchSnapshot {
   return snapshot;
 }
 
-export function createMcpServer(store: SnapshotStore): McpServer {
+export function createMcpServer(
+  store: SnapshotStore,
+  drafts: DraftStore,
+): McpServer {
   const server = new McpServer({
     name: "blockbench-codex-studio",
     version: "0.1.0",
@@ -108,6 +121,134 @@ export function createMcpServer(store: SnapshotStore): McpServer {
           },
         ],
       };
+    },
+  );
+
+  server.registerTool(
+    "begin_draft",
+    {
+      description: "Begin an isolated, reversible Blockbench edit draft.",
+      inputSchema: { label: z.string().min(1).max(120) },
+    },
+    ({ label }) => jsonContent(drafts.begin(requireSnapshot(store), label)),
+  );
+
+  server.registerTool(
+    "move_cube_preserve_size",
+    {
+      description: "Add a size-preserving cube translation to a draft.",
+      inputSchema: {
+        transactionId: transactionIdSchema,
+        elementId: z.string().min(1),
+        to: bounds3Schema,
+      },
+    },
+    ({ transactionId, elementId, to }) =>
+      jsonContent(
+        drafts.move(requireSnapshot(store), transactionId, elementId, to),
+      ),
+  );
+
+  server.registerTool(
+    "get_draft_summary",
+    {
+      description: "Inspect the exact operations currently staged in a draft.",
+      inputSchema: { transactionId: transactionIdSchema },
+    },
+    ({ transactionId }) => jsonContent(drafts.get(transactionId)),
+  );
+
+  server.registerTool(
+    "validate_draft",
+    {
+      description:
+        "Validate staged operations against current project, group, bounds, and dimension invariants.",
+      inputSchema: { transactionId: transactionIdSchema },
+    },
+    ({ transactionId }) =>
+      jsonContent(drafts.validate(requireSnapshot(store), transactionId)),
+  );
+
+  server.registerTool(
+    "commit_draft",
+    {
+      description:
+        "Queue a validated draft as one named Blockbench Undo transaction.",
+      inputSchema: { transactionId: transactionIdSchema },
+    },
+    ({ transactionId }) =>
+      jsonContent({
+        queued: true,
+        command: drafts.commit(requireSnapshot(store), transactionId),
+      }),
+  );
+
+  server.registerTool(
+    "discard_draft",
+    {
+      description:
+        "Discard a draft without changing the live Blockbench project.",
+      inputSchema: { transactionId: transactionIdSchema },
+    },
+    ({ transactionId }) => {
+      drafts.discard(transactionId);
+      return jsonContent({ discarded: true, transactionId });
+    },
+  );
+
+  server.registerTool(
+    "connect_selected_chain",
+    {
+      description:
+        "Infer the anchor among selected cubes and stage a deterministic, size-preserving connected chain in their shared group.",
+      inputSchema: {
+        label: z.string().min(1).max(120).default("Connect selected chain"),
+        overlap: z.number().positive().max(1).default(0.25),
+      },
+    },
+    ({ label, overlap }) => {
+      const snapshot = requireSnapshot(store);
+      const selectedIds = new Set(snapshot.selection);
+      const selected = snapshot.elements.filter((element) =>
+        selectedIds.has(element.id),
+      );
+      const layout = layoutConnectedChain(selected, {
+        ...(snapshot.project.bounds === undefined
+          ? {}
+          : { envelope: snapshot.project.bounds }),
+        overlap,
+      });
+      let summary = drafts.begin(snapshot, label);
+      for (const target of layout.targets)
+        summary = drafts.move(
+          snapshot,
+          summary.transactionId,
+          target.element.id,
+          target.bounds,
+        );
+      return jsonContent({
+        anchorId: layout.anchor.id,
+        targetIds: layout.targets.map(({ element }) => element.id),
+        connectedEdgeCount: layout.targets.length,
+        draft: summary,
+      });
+    },
+  );
+
+  server.registerTool(
+    "inspect_connectivity",
+    {
+      description:
+        "Inspect physical overlap/contact and connected components among the currently selected cubes.",
+      inputSchema: { tolerance: z.number().nonnegative().max(1).default(0) },
+    },
+    ({ tolerance }) => {
+      const snapshot = requireSnapshot(store);
+      const selectedIds = new Set(snapshot.selection);
+      const selected = snapshot.elements.filter((element) =>
+        selectedIds.has(element.id),
+      );
+      return jsonContent(inspectConnectivity(selected, tolerance));
     },
   );
 

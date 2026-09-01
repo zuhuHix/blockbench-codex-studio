@@ -28,7 +28,20 @@ npm run build
 npm start -w @blockbench-codex/mcp-server
 ```
 
-Install `apps/blockbench-plugin/dist/blockbench-codex-studio.js` as a development plugin in Blockbench. Open **Tools > Configure Codex Studio** and enter the same token. The plugin publishes project state once per second and publishes a 768x768 image when **Tools > Capture Viewport for Codex** is selected.
+Install `apps/blockbench-plugin/dist/blockbench-codex-studio.js` as a development plugin in Blockbench. Open **Tools > Configure Codex Studio** and enter the same token. The plugin publishes project state once per second and publishes a 768x768 image when **Tools > Capture Viewport for Codex** is selected. Committed drafts also publish the resulting viewport automatically; the server retains that capture across later state-only snapshots.
+
+## First playable chain workflow
+
+With one main blob and at least one loose cube selected in the same Outliner group:
+
+1. Call `connect_selected_chain`. The server infers the anchor from semantic naming and volume, preserves target dimensions, and stages physically overlapping moves in the targets' original dominant direction.
+2. Inspect the returned operation list with `get_draft_summary`.
+3. Call `validate_draft` to re-check the live project, parent groups, dimensions, and configured project bounds.
+4. Call `commit_draft` with the returned transaction ID.
+5. The plugin applies every move as one named Blockbench Undo entry, refreshes the canvas, and publishes a 768x768 result capture.
+6. Call `capture_viewport` to inspect the result. One Ctrl+Z reverts the complete committed draft.
+
+The semantic operation rejects root-level targets, mixed-group selections, stale geometry, dimension changes, and layouts outside known project bounds.
 
 Codex registration is explicit and uses the supported Streamable HTTP flags:
 
