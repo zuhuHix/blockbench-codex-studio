@@ -6,12 +6,15 @@ import {
 } from "./bridge-client.js";
 import { captureSnapshot, captureViewport } from "./snapshot.js";
 import { applyCommand } from "./command-applier.js";
+import { createAssistantPanel } from "./assistant-panel.js";
 
 const tokenStorageKey = "blockbench_codex_studio_token";
 let publishTimer: ReturnType<typeof setInterval> | undefined;
 let configureAction: Action | undefined;
 let captureAction: Action | undefined;
 let applyingCommand = false;
+let assistantPanel: Panel | undefined;
+let assistantStyles: { delete(): void } | undefined;
 
 async function pollCommands(settings: BridgeSettings): Promise<void> {
   if (applyingCommand) return;
@@ -101,10 +104,13 @@ Plugin.register("blockbench_codex_studio", {
   description:
     "Safe, typed Blockbench inspection and modeling through Codex MCP.",
   icon: "smart_toy",
-  version: "0.1.0",
+  version: "0.2.0",
   min_version: "5.0.0",
   variant: "desktop",
   onload() {
+    const assistant = createAssistantPanel(currentSettings, showConfiguration);
+    assistantPanel = assistant.panel;
+    assistantStyles = assistant.styles;
     configureAction = new Action("blockbench_codex_configure", {
       name: "Configure Codex Studio",
       description: "Set the local MCP bridge bearer token.",
@@ -140,5 +146,7 @@ Plugin.register("blockbench_codex_studio", {
     if (publishTimer !== undefined) clearInterval(publishTimer);
     configureAction?.delete();
     captureAction?.delete();
+    assistantPanel?.delete();
+    assistantStyles?.delete();
   },
 });

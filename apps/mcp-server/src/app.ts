@@ -6,11 +6,18 @@ import {
   commandAcknowledgementSchema,
 } from "@blockbench-codex/contracts";
 import type { Express } from "express";
+import { z } from "zod";
 
 import { createBearerAuth } from "./auth.js";
 import { createMcpServer } from "./mcp.js";
 import { SnapshotStore } from "./snapshot-store.js";
 import { DraftStore } from "./draft-store.js";
+import { ChatManager } from "./chat-manager.js";
+
+const chatMessageSchema = z.object({
+  prompt: z.string(),
+  model: z.string().optional(),
+});
 
 export interface StudioServerOptions {
   readonly token: string;
@@ -31,10 +38,74 @@ export interface RunningStudioServer {
 export function createStudioApp(
   token: string,
   store = new SnapshotStore(),
+  port = 48172,
 ): Express {
   const app = createMcpExpressApp({ host: "127.0.0.1" });
   const authenticate = createBearerAuth(token);
   const drafts = new DraftStore();
+  const chats = new ChatManager();
+
+  app.post("/bridge/chat/sessions", authenticate, (_request, response) => {
+    response.status(201).json({ sessionId: chats.create() });
+  });
+
+  app.get(
+    "/bridge/chat/:sessionId/events",
+    authenticate,
+    (request, response) => {
+      try {
+        const afterValue = request.query.after;
+        const after =
+          typeof afterValue === "string"
+            ? Number.parseInt(afterValue, 10) || 0
+            : 0;
+        response.json({
+          events: chats.events(String(request.params.sessionId), after),
+        });
+      } catch (error) {
+        response.status(404).json({
+          error: error instanceof Error ? error.message : "Unknown session.",
+        });
+      }
+    },
+  );
+
+  app.post(
+    "/bridge/chat/:sessionId/messages",
+    authenticate,
+    (request, response) => {
+      try {
+        const message = chatMessageSchema.parse(request.body);
+        chats.send(
+          String(request.params.sessionId),
+          message.prompt,
+          message.model ?? "gpt-5.6-terra",
+          port,
+          token,
+        );
+        response.status(202).json({ accepted: true });
+      } catch (error) {
+        response.status(400).json({
+          error: error instanceof Error ? error.message : "Message rejected.",
+        });
+      }
+    },
+  );
+
+  app.post(
+    "/bridge/chat/:sessionId/stop",
+    authenticate,
+    (request, response) => {
+      try {
+        chats.stop(String(request.params.sessionId));
+        response.status(202).json({ accepted: true });
+      } catch (error) {
+        response.status(404).json({
+          error: error instanceof Error ? error.message : "Unknown session.",
+        });
+      }
+    },
+  );
 
   app.get("/health", authenticate, (_request, response) => {
     response.json({ server: "ok", blockbench: store.status() });
@@ -111,7 +182,7 @@ export async function startStudioServer(
 ): Promise<RunningStudioServer> {
   const host = options.host ?? "127.0.0.1";
   const store = options.store ?? new SnapshotStore();
-  const app = createStudioApp(options.token, store);
+  const app = createStudioApp(options.token, store, options.port ?? 48172);
   const httpServer = await new Promise<Server>((resolve, reject) => {
     const listeningServer = app.listen(options.port ?? 48172, host, () =>
       resolve(listeningServer),

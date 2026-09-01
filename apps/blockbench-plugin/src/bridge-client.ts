@@ -11,7 +11,7 @@ export interface BridgeSettings {
   readonly token: string;
 }
 
-function requestJson<T>(
+export function requestJson<T>(
   settings: BridgeSettings,
   path: string,
   method: "GET" | "POST",
@@ -77,6 +77,58 @@ function requestJson<T>(
       }
     });
   });
+}
+
+export interface ChatEvent {
+  readonly id: number;
+  readonly type: "assistant" | "tool" | "status" | "done" | "error";
+  readonly text?: string;
+  readonly detail?: unknown;
+  readonly createdAt: string;
+}
+
+export async function createChatSession(
+  settings: BridgeSettings,
+): Promise<string> {
+  const result = await requestJson<{ sessionId: string }>(
+    settings,
+    "/bridge/chat/sessions",
+    "POST",
+    {},
+  );
+  return result.sessionId;
+}
+
+export function sendChatMessage(
+  settings: BridgeSettings,
+  sessionId: string,
+  prompt: string,
+  model: string,
+): Promise<unknown> {
+  return requestJson(settings, `/bridge/chat/${sessionId}/messages`, "POST", {
+    prompt,
+    model,
+  });
+}
+
+export async function fetchChatEvents(
+  settings: BridgeSettings,
+  sessionId: string,
+  after: number,
+): Promise<readonly ChatEvent[]> {
+  const result = await requestJson<{ events: ChatEvent[] }>(
+    settings,
+    `/bridge/chat/${sessionId}/events?after=${after}`,
+    "GET",
+  );
+  return result.events;
+}
+
+export function stopChat(
+  settings: BridgeSettings,
+  sessionId: string,
+): Promise<unknown> {
+  return requestJson(settings, `/bridge/chat/${sessionId}/stop`, "POST", {});
 }
 
 export async function fetchCommands(

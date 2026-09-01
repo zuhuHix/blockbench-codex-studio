@@ -54,7 +54,12 @@ try {
         $resolvedProject = (Resolve-Path -LiteralPath $ProjectPath).Path
         $blockbenchArguments += $resolvedProject
     }
-    $blockbenchProcess = Start-Process -FilePath $blockbenchExe -ArgumentList $blockbenchArguments -PassThru
+    if ($blockbenchArguments.Count -eq 0) {
+        $blockbenchProcess = Start-Process -FilePath $blockbenchExe -PassThru
+    }
+    else {
+        $blockbenchProcess = Start-Process -FilePath $blockbenchExe -ArgumentList $blockbenchArguments -PassThru
+    }
 }
 finally {
     if ($null -eq $previousToken) { Remove-Item Env:BLOCKBENCH_CODEX_TOKEN -ErrorAction SilentlyContinue }

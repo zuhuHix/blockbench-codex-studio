@@ -91,6 +91,23 @@ describe("studio HTTP app", () => {
       .expect(400);
   });
 
+  it("creates an authenticated integrated chat session", async () => {
+    const app = createStudioApp(token);
+    const created = await request(app)
+      .post("/bridge/chat/sessions")
+      .set(authorization)
+      .send({})
+      .expect(201);
+    const sessionId = String(
+      (created.body as { sessionId: unknown }).sessionId,
+    );
+    expect(sessionId).toMatch(/^[0-9a-f-]{36}$/u);
+    await request(app)
+      .get(`/bridge/chat/${sessionId}/events?after=0`)
+      .set(authorization)
+      .expect(200, { events: [] });
+  });
+
   it("serves live Blockbench state through the MCP tool loop", async () => {
     const running = await startStudioServer({ token, port: 0 });
     running.store.set(snapshot);

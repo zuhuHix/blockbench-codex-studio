@@ -33,6 +33,10 @@ declare class Dialog {
   show(): void;
   hide(): void;
 }
+declare class Panel {
+  constructor(id: string, options: Record<string, unknown>);
+  delete(): void;
+}
 
 declare const Plugin: {
   register(id: string, metadata: Record<string, unknown>): void;
@@ -44,6 +48,7 @@ declare const MenuBar: {
 };
 declare const Blockbench: {
   showQuickMessage(message: string, duration?: number): void;
+  addCSS(css: string): { delete(): void };
 };
 declare const Project:
   | {
@@ -52,7 +57,10 @@ declare const Project:
       readonly format?: { readonly id?: string };
     }
   | undefined;
-declare const Cube: { readonly all: readonly BlockbenchNode[] };
+declare const Cube: {
+  readonly all: readonly BlockbenchNode[];
+  readonly selected: readonly BlockbenchNode[];
+};
 declare const Undo: {
   initEdit(options: { elements: readonly BlockbenchNode[] }): void;
   finishEdit(
@@ -60,6 +68,7 @@ declare const Undo: {
     options: { elements: readonly BlockbenchNode[] },
   ): void;
   cancelEdit(revert?: boolean): void;
+  undo(): void;
 };
 declare const Canvas: {
   updateView(options: {
