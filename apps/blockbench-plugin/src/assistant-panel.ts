@@ -238,6 +238,9 @@ export function createAssistantPanel(
     .bcs-shell>.bcs-timeline{align-self:stretch!important;width:100%!important;flex-grow:1!important;flex-shrink:1!important}
     .bcs-shell>.bcs-composer{margin-top:auto}
     .bcs-shell .bcs-welcome{box-sizing:border-box;width:100%;padding:10px 4px}
+    :is(.panel_content,.vue_component,.panel_vue_wrapper):has(.bcs-shell){box-sizing:border-box!important;display:flex!important;flex-direction:column!important;height:100%!important;min-height:0!important;max-height:100%!important;overflow:hidden!important}
+    :is(.panel_content,.vue_component,.panel_vue_wrapper):has(.bcs-shell)>:has(.bcs-shell){display:flex!important;flex:1 1 auto!important;flex-direction:column!important;height:auto!important;min-height:0!important}
+    :is(.panel_content,.vue_component,.panel_vue_wrapper):has(.bcs-shell)>.bcs-shell{flex:1 1 auto!important;height:auto!important;min-height:0!important;max-height:none!important}
     .bcs-shell{box-sizing:border-box!important;width:100%!important;height:100%!important;max-height:100%!important;min-height:0!important;overflow-x:hidden!important;overflow-y:auto!important;scrollbar-gutter:stable}
     .bcs-shell .bcs-timeline{box-sizing:border-box!important;flex:1 1 180px!important;height:auto!important;min-height:56px!important;max-height:none!important;resize:none;overflow-x:hidden!important;overflow-y:auto!important;overscroll-behavior:contain;scrollbar-gutter:stable}
     .bcs-shell .bcs-events{flex:none;max-width:100%;overflow:hidden}
