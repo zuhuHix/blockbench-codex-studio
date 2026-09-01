@@ -80,6 +80,8 @@ export class ChatManager {
       "--ignore-user-config",
       "--ignore-rules",
       "-c",
+      'approval_policy="never"',
+      "-c",
       `mcp_servers.blockbench-codex-studio.url="http://127.0.0.1:${port}/mcp"`,
       "-c",
       'mcp_servers.blockbench-codex-studio.bearer_token_env_var="BLOCKBENCH_CODEX_TOKEN"',
