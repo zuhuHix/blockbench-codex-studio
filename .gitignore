@@ -1,0 +1,34 @@
+# Dependencies and package-manager state
+node_modules/
+.pnpm-store/
+
+# Build and test output
+dist/
+build/
+coverage/
+*.tsbuildinfo
+
+# Local environment and credentials
+.env
+.env.*
+!.env.example
+*.local
+
+# Runtime state and logs
+logs/
+*.log
+*.pid
+
+# Editors and operating systems
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# Blockbench/Codex local configuration and generated artifacts
+.blockbench-codex.local.json
+generated/
+temp/
+tmp/
+

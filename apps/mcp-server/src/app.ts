@@ -1,0 +1,120 @@
+import type { Server } from "node:http";
+import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
+import { createMcpExpressApp } from "@modelcontextprotocol/sdk/server/express.js";
+import { blockbenchSnapshotSchema } from "@blockbench-codex/contracts";
+import type { Express } from "express";
+
+import { createBearerAuth } from "./auth.js";
+import { createMcpServer } from "./mcp.js";
+import { SnapshotStore } from "./snapshot-store.js";
+
+export interface StudioServerOptions {
+  readonly token: string;
+  readonly host?: "127.0.0.1";
+  readonly port?: number;
+  readonly store?: SnapshotStore;
+}
+
+export interface RunningStudioServer {
+  readonly app: Express;
+  readonly httpServer: Server;
+  readonly host: string;
+  readonly port: number;
+  readonly store: SnapshotStore;
+  close(): Promise<void>;
+}
+
+export function createStudioApp(
+  token: string,
+  store = new SnapshotStore(),
+): Express {
+  const app = createMcpExpressApp({ host: "127.0.0.1" });
+  const authenticate = createBearerAuth(token);
+
+  app.get("/health", authenticate, (_request, response) => {
+    response.json({ server: "ok", blockbench: store.status() });
+  });
+
+  app.post("/bridge/snapshot", authenticate, (request, response) => {
+    const parsed = blockbenchSnapshotSchema.safeParse(request.body);
+    if (!parsed.success) {
+      response.status(400).json({
+        error: "Invalid Blockbench snapshot.",
+        issues: parsed.error.issues,
+      });
+      return;
+    }
+    store.set(parsed.data);
+    response.status(202).json({ accepted: true });
+  });
+
+  app.post("/mcp", authenticate, async (request, response) => {
+    const server = createMcpServer(store);
+    const transport = new StreamableHTTPServerTransport({
+      sessionIdGenerator: undefined,
+    });
+    response.on("close", () => {
+      void transport.close();
+      void server.close();
+    });
+
+    try {
+      await server.connect(transport);
+      await transport.handleRequest(request, response, request.body);
+    } catch (error) {
+      if (!response.headersSent) {
+        response.status(500).json({
+          jsonrpc: "2.0",
+          error: {
+            code: -32603,
+            message:
+              error instanceof Error ? error.message : "Internal server error",
+          },
+          id: null,
+        });
+      }
+    }
+  });
+
+  app.all("/mcp", authenticate, (_request, response) => {
+    response.status(405).json({
+      jsonrpc: "2.0",
+      error: { code: -32000, message: "Method not allowed." },
+      id: null,
+    });
+  });
+
+  return app;
+}
+
+export async function startStudioServer(
+  options: StudioServerOptions,
+): Promise<RunningStudioServer> {
+  const host = options.host ?? "127.0.0.1";
+  const store = options.store ?? new SnapshotStore();
+  const app = createStudioApp(options.token, store);
+  const httpServer = await new Promise<Server>((resolve, reject) => {
+    const listeningServer = app.listen(options.port ?? 48172, host, () =>
+      resolve(listeningServer),
+    );
+    listeningServer.once("error", reject);
+  });
+  const address = httpServer.address();
+  if (address === null || typeof address === "string") {
+    throw new Error("Unable to determine the MCP server port.");
+  }
+
+  return {
+    app,
+    httpServer,
+    host,
+    port: address.port,
+    store,
+    close: () =>
+      new Promise<void>((resolve, reject) => {
+        httpServer.close((error) =>
+          error === undefined ? resolve() : reject(error),
+        );
+      }),
+  };
+}
