@@ -234,6 +234,10 @@ export function createAssistantPanel(
     .bcs-shell .bcs-composer textarea{padding-right:58px}
     .bcs-shell .bcs-status{align-self:flex-start;margin:4px 0 0 10px;padding:1px 4px!important;background:transparent!important;border:0!important;line-height:16px;opacity:.72}
     .bcs-shell .bcs-status>span{width:6px;height:6px;box-shadow:none}
+    .bcs-shell>.bcs-header,.bcs-shell>.bcs-status,.bcs-shell>.bcs-context,.bcs-shell>.bcs-composer{flex:0 0 auto!important}
+    .bcs-shell>.bcs-timeline{align-self:stretch!important;width:100%!important;flex-grow:1!important;flex-shrink:1!important}
+    .bcs-shell>.bcs-composer{margin-top:auto}
+    .bcs-shell .bcs-welcome{box-sizing:border-box;width:100%;padding:10px 4px}
     .bcs-shell{box-sizing:border-box!important;width:100%!important;height:100%!important;max-height:100%!important;min-height:0!important;overflow-x:hidden!important;overflow-y:auto!important;scrollbar-gutter:stable}
     .bcs-shell .bcs-timeline{box-sizing:border-box!important;flex:1 1 180px!important;height:auto!important;min-height:56px!important;max-height:none!important;resize:none;overflow-x:hidden!important;overflow-y:auto!important;overscroll-behavior:contain;scrollbar-gutter:stable}
     .bcs-shell .bcs-events{flex:none;max-width:100%;overflow:hidden}
