@@ -42,6 +42,7 @@ export function createAssistantPanel(
           previewFirst: true,
           viewportAttached: false,
           poller: undefined as ReturnType<typeof setInterval> | undefined,
+          panelResizeObserver: undefined as ResizeObserver | undefined,
         };
       },
       computed: {
@@ -60,11 +61,46 @@ export function createAssistantPanel(
       async mounted() {
         await this.newChat(false);
         this.poller = setInterval(() => void this.pollEvents(), 600);
+        requestAnimationFrame(() => this.observePanelSize());
       },
       beforeDestroy() {
         if (this.poller) clearInterval(this.poller);
+        this.panelResizeObserver?.disconnect();
       },
       methods: {
+        observePanelSize() {
+          const shell = this.$el as HTMLElement;
+          let host = shell.closest(".panel") as HTMLElement | null;
+          if (!host) {
+            let candidate = shell.parentElement;
+            while (candidate) {
+              if (
+                candidate.clientHeight > shell.clientHeight + 24 &&
+                Math.abs(candidate.clientWidth - shell.clientWidth) < 20
+              ) {
+                host = candidate;
+                break;
+              }
+              candidate = candidate.parentElement;
+            }
+          }
+          if (!host) return;
+          const resize = () => {
+            const shellTop = shell.getBoundingClientRect().top;
+            const hostBottom = host!.getBoundingClientRect().bottom;
+            const available = Math.max(180, Math.floor(hostBottom - shellTop));
+            shell.style.setProperty("height", `${available}px`, "important");
+            shell.style.setProperty(
+              "max-height",
+              `${available}px`,
+              "important",
+            );
+          };
+          resize();
+          this.panelResizeObserver?.disconnect();
+          this.panelResizeObserver = new ResizeObserver(resize);
+          this.panelResizeObserver.observe(host);
+        },
         async newChat(notify = true) {
           const bridge = settings();
           if (!bridge) {
