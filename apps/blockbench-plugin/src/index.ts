@@ -125,16 +125,14 @@ Plugin.register("blockbench_codex_studio", {
           )
           .catch((error: unknown) =>
             Blockbench.showQuickMessage(
-              error instanceof Error
-                ? error.message
-                : "Viewport publication failed.",
-              3000,
+              error instanceof Error ? error.message : String(error),
+              6000,
             ),
           );
       },
     });
-    MenuBar.addAction(configureAction, "tools");
-    MenuBar.addAction(captureAction, "tools");
+    MenuBar.menus.tools.addAction(configureAction);
+    MenuBar.menus.tools.addAction(captureAction);
     if (currentSettings() === undefined) showConfiguration();
     else beginPublishing();
   },

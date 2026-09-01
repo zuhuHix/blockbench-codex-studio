@@ -37,7 +37,11 @@ declare class Dialog {
 declare const Plugin: {
   register(id: string, metadata: Record<string, unknown>): void;
 };
-declare const MenuBar: { addAction(action: Action, location: string): void };
+declare const MenuBar: {
+  readonly menus: {
+    readonly tools: { addAction(action: Action): void };
+  };
+};
 declare const Blockbench: {
   showQuickMessage(message: string, duration?: number): void;
 };
@@ -79,3 +83,10 @@ declare const localStorage: {
   getItem(key: string): string | null;
   setItem(key: string, value: string): void;
 };
+declare function requireNativeModule(
+  moduleName: string,
+  options?: {
+    readonly message?: string;
+    readonly optional?: boolean;
+  },
+): unknown;

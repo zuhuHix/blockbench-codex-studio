@@ -1,4 +1,4 @@
-import * as http from "node:http";
+import type * as Net from "node:net";
 import type { captureSnapshot } from "./snapshot.js";
 import type {
   ApplyDraftCommand,
@@ -17,43 +17,65 @@ function requestJson<T>(
   method: "GET" | "POST",
   value?: unknown,
 ): Promise<T> {
-  const body = value === undefined ? undefined : JSON.stringify(value);
-  return new Promise((resolve, reject) => {
-    const request = http.request(
-      {
-        hostname: settings.host,
-        port: settings.port,
-        path,
-        method,
-        headers: {
-          Authorization: `Bearer ${settings.token}`,
-          ...(body === undefined
-            ? {}
-            : {
-                "Content-Type": "application/json",
-                "Content-Length": Buffer.byteLength(body),
-              }),
-        },
-      },
-      (response) => {
-        let data = "";
-        response.setEncoding("utf8");
-        response.on("data", (chunk: string) => {
-          data += chunk;
-        });
-        response.on("end", () => {
-          if ((response.statusCode ?? 500) >= 300)
-            reject(
-              new Error(
-                `Bridge request failed with HTTP ${response.statusCode ?? 0}.`,
-              ),
-            );
-          else resolve((data === "" ? undefined : JSON.parse(data)) as T);
-        });
-      },
+  const net = requireNativeModule("net", {
+    message:
+      "Connect only to the authenticated Blockbench Codex Studio server on 127.0.0.1.",
+    optional: false,
+  }) as typeof Net | undefined;
+  if (net === undefined)
+    return Promise.reject(
+      new Error("Blockbench network permission was not granted."),
     );
-    request.once("error", reject);
-    request.end(body);
+  const body = value === undefined ? "" : JSON.stringify(value);
+  const request = [
+    `${method} ${path} HTTP/1.1`,
+    `Host: ${settings.host}:${settings.port}`,
+    `Authorization: Bearer ${settings.token}`,
+    "Accept: application/json",
+    "Connection: close",
+    ...(body === ""
+      ? []
+      : [
+          "Content-Type: application/json",
+          `Content-Length: ${Buffer.byteLength(body)}`,
+        ]),
+    "",
+    body,
+  ].join("\r\n");
+
+  return new Promise((resolve, reject) => {
+    const socket = net.createConnection(
+      { host: settings.host, port: settings.port },
+      () => socket.write(request),
+    );
+    let response = "";
+    socket.setEncoding("utf8");
+    socket.on("data", (chunk) => {
+      response += String(chunk);
+    });
+    socket.once("error", reject);
+    socket.once("end", () => {
+      const separator = response.indexOf("\r\n\r\n");
+      const headers = separator < 0 ? response : response.slice(0, separator);
+      const responseBody = separator < 0 ? "" : response.slice(separator + 4);
+      const status = /^HTTP\/1\.1\s+(\d{3})/u.exec(headers)?.[1];
+      const statusCode = status === undefined ? 0 : Number.parseInt(status, 10);
+      if (statusCode < 200 || statusCode >= 300) {
+        reject(
+          new Error(
+            `Bridge request failed with HTTP ${statusCode}: ${responseBody}`,
+          ),
+        );
+        return;
+      }
+      try {
+        resolve(
+          (responseBody === "" ? undefined : JSON.parse(responseBody)) as T,
+        );
+      } catch {
+        reject(new Error("Bridge returned invalid JSON."));
+      }
+    });
   });
 }
 
@@ -77,36 +99,9 @@ export function acknowledgeCommand(
 
 type Snapshot = NonNullable<ReturnType<typeof captureSnapshot>>;
 
-export function publishSnapshot(
+export async function publishSnapshot(
   settings: BridgeSettings,
   snapshot: Snapshot,
 ): Promise<void> {
-  const body = JSON.stringify(snapshot);
-  return new Promise((resolve, reject) => {
-    const request = http.request(
-      {
-        hostname: settings.host,
-        port: settings.port,
-        path: "/bridge/snapshot",
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${settings.token}`,
-          "Content-Type": "application/json",
-          "Content-Length": Buffer.byteLength(body),
-        },
-      },
-      (response) => {
-        response.resume();
-        if (response.statusCode === 202) resolve();
-        else
-          reject(
-            new Error(
-              `Bridge rejected snapshot with HTTP ${response.statusCode ?? 0}.`,
-            ),
-          );
-      },
-    );
-    request.once("error", reject);
-    request.end(body);
-  });
+  await requestJson(settings, "/bridge/snapshot", "POST", snapshot);
 }
