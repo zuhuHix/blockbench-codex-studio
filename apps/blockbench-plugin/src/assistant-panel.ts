@@ -173,6 +173,22 @@ export function createAssistantPanel(
           Undo.undo();
           Blockbench.showQuickMessage("Undid the last Blockbench edit.", 1800);
         },
+        async copyMessage(text: string) {
+          try {
+            await navigator.clipboard.writeText(text);
+            Blockbench.showQuickMessage("Codex message copied.", 1400);
+          } catch {
+            const field = document.createElement("textarea");
+            field.value = text;
+            field.style.position = "fixed";
+            field.style.opacity = "0";
+            document.body.appendChild(field);
+            field.select();
+            document.execCommand("copy");
+            field.remove();
+            Blockbench.showQuickMessage("Codex message copied.", 1400);
+          }
+        },
         configure,
         eventLabel(event: ChatEvent) {
           const detail = event.detail as
@@ -186,7 +202,7 @@ export function createAssistantPanel(
           <div class="bcs-status" :class="{offline:!connected}"><span></span>{{ connected ? (working ? 'Codex is working' : 'MCP connected') : 'Bridge offline' }}</div>
           <main class="bcs-timeline">
             <div v-if="!messages.length" class="bcs-welcome"><span class="material-icons">auto_awesome</span><h3>Design directly in Blockbench</h3><p>Describe a change, attach the viewport, or select model parts. Codex can inspect, draft, validate, and apply through the MCP bridge.</p><div><button @click="prompt='Inspect my selection and suggest improvements'">Inspect selection</button><button @click="prompt='Make these parts form a connected chain'">Connect selection</button><button @click="capture">Attach viewport</button></div></div>
-            <article v-for="(message,index) in messages" :key="index" class="bcs-message" :class="message.role"><b>{{ message.role==='you'?'You':message.role==='error'?'Error':'Codex' }}</b><p>{{ message.text }}</p></article>
+            <article v-for="(message,index) in messages" :key="index" class="bcs-message" :class="message.role"><div class="bcs-message-heading"><b>{{ message.role==='you'?'You':message.role==='error'?'Error':'Codex' }}</b><button v-if="message.role==='codex'" title="Copy message" @click="copyMessage(message.text)"><span class="material-icons">content_copy</span></button></div><p>{{ message.text }}</p></article>
             <details v-if="toolEvents.length" class="bcs-events" :open="showDetails" @toggle="showDetails=$event.target.open"><summary><span class="material-icons">account_tree</span>{{ toolEvents.length }} MCP events</summary><div v-for="event in toolEvents" :key="event.id"><span>{{ eventLabel(event) }}</span><pre v-if="showDetails">{{ JSON.stringify(event.detail,null,2) }}</pre></div></details>
           </main>
           <section class="bcs-context"><div class="bcs-chips"><span v-for="item in selection.slice(0,4)" :key="item.uuid" class="bcs-chip"><span class="material-icons">check_box</span>{{ item.name }}</span><span v-if="selection.length>4" class="bcs-chip">+{{ selection.length-4 }}</span><span v-if="viewportAttached" class="bcs-chip accent"><span class="material-icons">photo_camera</span>Viewport</span></div><div class="bcs-toolbar"><button @click="capture" title="Capture viewport"><span class="material-icons">photo_camera</span></button><label><input type="checkbox" v-model="previewFirst"> Preview first</label><select v-model="model" :disabled="working" @mousedown="modelMenuOpen=true" @change="modelMenuOpen=false" @blur="modelMenuOpen=false"><option value="gpt-5.6-sol">{{ modelMenuOpen ? 'Sol · Quality' : 'Sol' }}</option><option value="gpt-5.6-terra">{{ modelMenuOpen ? 'Terra · Balanced' : 'Terra' }}</option><option value="gpt-5.6-luna">{{ modelMenuOpen ? 'Luna · Fast' : 'Luna' }}</option></select></div></section>
@@ -201,9 +217,14 @@ export function createAssistantPanel(
     .bcs-shell .bcs-header-actions button{box-sizing:border-box!important;min-width:24px!important;width:24px!important;max-width:24px!important;height:26px!important;margin:0!important;padding:0!important}
     .bcs-shell .bcs-send{box-sizing:border-box!important;display:flex!important;align-items:center!important;justify-content:center!important;min-width:20px!important;width:20px!important;max-width:20px!important;min-height:20px!important;height:20px!important;margin:0!important;padding:0!important;border:0!important;border-radius:50%!important;box-shadow:none!important}
     .bcs-shell .bcs-send .material-icons{display:block;font-size:13px!important;line-height:1!important;margin:0!important}
-    .bcs-shell{box-sizing:border-box!important;width:100%!important;height:100%!important;max-height:100%!important;min-height:0!important;overflow:hidden!important}
-    .bcs-shell .bcs-timeline{box-sizing:border-box!important;flex:1 1 0!important;height:0!important;min-height:0!important;overflow-x:hidden!important;overflow-y:auto!important;overscroll-behavior:contain;scrollbar-gutter:stable}
+    .bcs-shell{box-sizing:border-box!important;width:100%!important;height:100%!important;max-height:100%!important;min-height:0!important;overflow-x:hidden!important;overflow-y:auto!important;scrollbar-gutter:stable}
+    .bcs-shell .bcs-timeline{box-sizing:border-box!important;flex:0 0 auto!important;height:180px;min-height:56px!important;max-height:70vh;resize:vertical;overflow-x:hidden!important;overflow-y:auto!important;overscroll-behavior:contain;scrollbar-gutter:stable;border-bottom:3px solid transparent}
     .bcs-shell .bcs-events{flex:none;max-width:100%;overflow:hidden}
+    .bcs-shell .bcs-message{position:relative;user-select:text!important}
+    .bcs-shell .bcs-message-heading{display:flex;align-items:center;justify-content:space-between;gap:8px}
+    .bcs-shell .bcs-message-heading button{box-sizing:border-box!important;display:flex!important;align-items:center!important;justify-content:center!important;min-width:20px!important;width:20px!important;max-width:20px!important;height:20px!important;margin:-3px -4px -3px 0!important;padding:0!important;border:0!important;background:transparent!important;opacity:.45}
+    .bcs-shell .bcs-message-heading button:hover{opacity:1}
+    .bcs-shell .bcs-message-heading button .material-icons{font-size:13px!important}
   `);
   return { panel, styles };
 }
