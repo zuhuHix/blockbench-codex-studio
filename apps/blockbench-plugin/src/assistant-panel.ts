@@ -120,9 +120,10 @@ export function createAssistantPanel(
           if (!text || !bridge || this.working) return;
           if (!this.sessionId) await this.newChat(false);
           const context = [
+            "EMBEDDED BLOCKBENCH MODE. The authenticated blockbench-codex-studio MCP server is the only authoritative source for the live model. Use its health, project, selection, outline, viewport, draft, validation, connectivity, and commit tools as needed. Never use desktop/computer control, shell commands, repository files, saved fixtures, or another Blockbench integration. If the MCP tools or live snapshot are unavailable, say that plainly and stop; do not invent or infer model contents from disk.",
             this.previewFirst
-              ? "Preview first: inspect and explain the intended edit before committing unless it is clearly harmless."
-              : "Apply safe changes immediately through the Blockbench MCP tools.",
+              ? "PREVIEW MODE: inspect the live MCP selection and scene, then describe the exact proposed edit. Do not begin, commit, or apply a draft until the user explicitly approves in a later message."
+              : "APPLY MODE: make safe changes only through typed Blockbench MCP draft tools, validate before commit, and summarize the committed result.",
             this.viewportAttached
               ? "A fresh viewport capture is published and available through capture_viewport."
               : "",

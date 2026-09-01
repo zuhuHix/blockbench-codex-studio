@@ -77,6 +77,8 @@ export class ChatManager {
       model,
       ...(isNew ? ["--sandbox", "read-only"] : []),
       "--skip-git-repo-check",
+      "--ignore-user-config",
+      "--ignore-rules",
       "-c",
       `mcp_servers.blockbench-codex-studio.url="http://127.0.0.1:${port}/mcp"`,
       "-c",
