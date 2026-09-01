@@ -199,7 +199,8 @@ export function createAssistantPanel(
     .bcs-welcome button{min-height:22px;height:22px;font-size:10px;line-height:20px;border-radius:11px;padding:0 9px}
     .bcs-shell .bcs-header-actions{gap:0!important}
     .bcs-shell .bcs-header-actions button{box-sizing:border-box!important;min-width:24px!important;width:24px!important;max-width:24px!important;height:26px!important;margin:0!important;padding:0!important}
-    .bcs-shell .bcs-send{box-sizing:border-box!important;min-width:20px!important;width:20px!important;max-width:20px!important;min-height:20px!important;height:20px!important;margin:0!important;padding:0!important}
+    .bcs-shell .bcs-send{box-sizing:border-box!important;display:flex!important;align-items:center!important;justify-content:center!important;min-width:20px!important;width:20px!important;max-width:20px!important;min-height:20px!important;height:20px!important;margin:0!important;padding:0!important;border:0!important;border-radius:50%!important;box-shadow:none!important}
+    .bcs-shell .bcs-send .material-icons{display:block;font-size:13px!important;line-height:1!important;margin:0!important}
   `);
   return { panel, styles };
 }
