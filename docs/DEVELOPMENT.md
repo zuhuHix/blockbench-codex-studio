@@ -135,6 +135,19 @@ The panel polls `GET /bridge/image-variants` for metadata and fetches each image
 
 Each variant can be favorited, discarded, or attached as a named reference in any role, which feeds straight back into the reference manager. The store keeps the 24 most recent variants and evicts unfavorited ones first, so favorites survive a long session. `hasAlphaChannel` reports only that the image _can_ carry transparency; whether the pixels are genuinely transparent rather than a painted checkerboard is verified at import in the next slice.
 
+## Phase 5 texture destinations
+
+The **Codex Images** panel shows the destination row for the active project: the project-relative path when the project has been saved, the absolute path otherwise, and whether the folder is writable. `Select texture folder…` opens the native Blockbench directory picker, and the folder is remembered per project in `%LOCALAPPDATA%\BlockbenchCodexStudio	exture-destinations.json`. The snapshot now publishes `project.filePath`, which is what makes the relative path and the suggested Minecraft folders (`assets/<modid>/textures/block`, `item`, `entity`) possible; any other folder is still selectable.
+
+Saving is deliberate and additive:
+
+- File names are sanitized to lowercase `a-z0-9_-` with a `.png` extension, so a generated title cannot escape the folder.
+- An existing file is never overwritten. A unique `_2`, `_3` name is used instead and the result reports `renamed: true`.
+- Each save appends one line to `codex-textures.jsonl` in the destination folder recording the file, prompt, mode, provider, seed, and dimensions. The manifest holds provenance only and never a credential.
+- `Reveal in Explorer` opens the folder itself, never a file.
+
+Tools: `get_texture_destination`, `set_texture_destination`, `save_image_variant`. Endpoints: `GET`/`POST /bridge/texture-destination`, `POST /bridge/texture-destination/reveal`, and `POST /bridge/image-variants/:id/save`. Saving writes a file but still imports nothing into Blockbench; import and pixel-art conversion are the last Phase 5 slice.
+
 ## Workspace map
 
 - `apps/blockbench-plugin`: in-process Blockbench adapter and UI

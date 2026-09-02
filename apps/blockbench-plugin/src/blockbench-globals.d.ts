@@ -60,12 +60,18 @@ declare const MenuBar: {
 declare const Blockbench: {
   showQuickMessage(message: string, duration?: number): void;
   addCSS(css: string): { delete(): void };
+  pickDirectory?(options: {
+    readonly title?: string;
+    readonly startpath?: string;
+    readonly resource_id?: string;
+  }): string | undefined;
 };
 declare const Project:
   | {
       readonly uuid?: string;
       readonly name?: string;
       readonly format?: { readonly id?: string };
+      readonly save_path?: string;
       readonly texture_width?: number;
       readonly texture_height?: number;
     }

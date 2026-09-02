@@ -5,7 +5,11 @@ import {
   fetchImageReferences,
   fetchImageVariants,
   fetchVariantDataUrl,
+  fetchTextureDestination,
   removeVariant,
+  revealTextureDestination,
+  saveVariant,
+  setTextureDestination,
   setVariantFavorite,
   type BridgeSettings,
 } from "./bridge-client.js";
@@ -53,6 +57,7 @@ export function createGalleryPanel(
           pixelGrid: false,
           favoritesOnly: false,
           role: "style",
+          destination: undefined as any,
           connected: false,
           poller: undefined as ReturnType<typeof setInterval> | undefined,
         };
@@ -99,6 +104,12 @@ export function createGalleryPanel(
           try {
             this.variants = [...(await fetchImageVariants(bridge))];
             this.references = [...(await fetchImageReferences(bridge))];
+            try {
+              this.destination = await fetchTextureDestination(bridge);
+            } catch {
+              // No project is published yet; the destination row stays hidden.
+              this.destination = undefined;
+            }
             this.connected = true;
             await this.loadMissingImages(bridge);
             if (this.openId && !this.open) this.close();
@@ -208,6 +219,46 @@ export function createGalleryPanel(
             this.report(error);
           }
         },
+        chooseFolder() {
+          const bridge = settings();
+          if (!bridge) return;
+          const picked = Blockbench.pickDirectory?.({
+            title: "Select texture folder",
+            startpath:
+              this.destination?.absolutePath ??
+              this.destination?.suggestions?.[0],
+            resource_id: "blockbench_codex_textures",
+          });
+          if (!picked) return;
+          void setTextureDestination(bridge, picked, true)
+            .then((destination: any) => {
+              this.destination = destination;
+            })
+            .catch((error: unknown) => this.report(error));
+        },
+        reveal() {
+          const bridge = settings();
+          if (!bridge) return;
+          void revealTextureDestination(bridge).catch((error: unknown) =>
+            this.report(error),
+          );
+        },
+        async save(variant: any) {
+          const bridge = settings();
+          if (!bridge) return;
+          try {
+            const saved = await saveVariant(bridge, variant.id);
+            Blockbench.showQuickMessage(
+              saved.renamed
+                ? `Saved as ${saved.fileName}; the requested name was taken.`
+                : `Saved ${saved.fileName}.`,
+              3000,
+            );
+            await this.refresh();
+          } catch (error) {
+            this.report(error);
+          }
+        },
         report(error: unknown) {
           Blockbench.showQuickMessage(
             error instanceof Error ? error.message : String(error),
@@ -226,6 +277,14 @@ export function createGalleryPanel(
             </div>
           </header>
           <div class="bcg-status" :class="{offline:!connected}"><span></span>{{ connected ? 'Gallery connected' : 'Bridge offline' }}</div>
+
+          <div v-if="destination" class="bcg-dest" :class="{bad:!destination.writable}">
+            <span class="material-icons">folder</span>
+            <span class="bcg-dest-path" :title="destination.absolutePath || destination.detail">{{ destination.projectRelativePath || destination.absolutePath || 'No texture folder chosen' }}</span>
+            <small>{{ destination.writable ? 'writable' : destination.detail }}</small>
+            <button title="Select texture folder" @click="chooseFolder"><span class="material-icons">folder_open</span></button>
+            <button v-if="destination.exists" title="Reveal in Explorer" @click="reveal"><span class="material-icons">open_in_new</span></button>
+          </div>
 
           <div v-if="references.length" class="bcg-refs"><span v-for="reference in references" :key="reference.id" class="bcg-chip" :title="reference.source + ' · ' + reference.width + '×' + reference.height"><span class="material-icons">label</span>{{ reference.name }} · {{ reference.role }}</span></div>
 
@@ -274,6 +333,7 @@ export function createGalleryPanel(
               <button @click="toggleFavorite(open)"><span class="material-icons">{{ open.favorite ? 'star' : 'star_border' }}</span>{{ open.favorite ? 'Favorited' : 'Favorite' }}</button>
               <select v-model="role" title="Reference role"><option v-for="entry in ${JSON.stringify(roles)}" :key="entry" :value="entry">{{ entry }}</option></select>
               <button @click="useAsReference(open)"><span class="material-icons">add_photo_alternate</span>Use as reference</button>
+              <button :disabled="!destination || !destination.writable" :title="destination &amp;&amp; destination.writable ? 'Save a PNG into the texture folder' : 'Choose a writable texture folder first'" @click="save(open)"><span class="material-icons">save_alt</span>Save PNG</button>
               <button class="danger" @click="discard(open)"><span class="material-icons">delete_outline</span>Discard</button>
             </footer>
           </main>
@@ -294,6 +354,14 @@ export function createGalleryPanel(
     .bcg-shell .material-icons{font-size:17px}
     .bcg-status{display:flex;align-items:center;gap:6px;padding:2px 12px;font-size:10px;opacity:.72;flex:0 0 auto}
     .bcg-status>span{width:6px;height:6px;border-radius:50%;background:#5fd48b}.bcg-status.offline>span{background:#e06565}
+    .bcg-dest{display:flex;align-items:center;gap:5px;padding:3px 8px 3px 10px;font-size:10px;flex:0 0 auto;border-bottom:1px solid var(--color-border)}
+    .bcg-dest>.material-icons{font-size:13px;opacity:.6}
+    .bcg-dest-path{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;direction:rtl;text-align:left}
+    .bcg-dest small{opacity:.55;white-space:nowrap}
+    .bcg-dest.bad small{color:#e08a5f;opacity:.9}
+    .bcg-dest button{width:22px;height:22px;padding:0}
+    .bcg-dest button .material-icons{font-size:14px}
+    .bcg-actions button:disabled{opacity:.45;cursor:default}
     .bcg-refs{display:flex;flex-wrap:wrap;gap:4px;padding:4px 10px;flex:0 0 auto}
     .bcg-chip{display:inline-flex;align-items:center;gap:3px;max-width:170px;padding:2px 6px;border-radius:10px;background:var(--color-button);font-size:10px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
     .bcg-chip .material-icons{font-size:11px}

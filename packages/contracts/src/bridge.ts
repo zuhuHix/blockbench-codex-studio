@@ -37,6 +37,8 @@ export const blockbenchSnapshotSchema = z.object({
     id: z.string().min(1),
     name: z.string().min(1),
     formatId: z.string().min(1),
+    /** Absolute path of the saved project file, when it has been saved. */
+    filePath: z.string().min(1).optional(),
     bounds: bounds3Schema.optional(),
     textureSize: z
       .object({ width: z.number().positive(), height: z.number().positive() })

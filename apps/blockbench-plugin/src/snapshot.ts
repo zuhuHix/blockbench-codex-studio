@@ -69,6 +69,9 @@ export function captureSnapshot(viewport?: ViewportSnapshot) {
       id: Project.uuid ?? Project.name ?? "untitled-project",
       name: Project.name ?? "Untitled Blockbench Project",
       formatId: Project.format?.id ?? "unknown",
+      ...(Project.save_path === undefined || Project.save_path === ""
+        ? {}
+        : { filePath: Project.save_path }),
       ...(Project.texture_width !== undefined &&
       Project.texture_height !== undefined
         ? {

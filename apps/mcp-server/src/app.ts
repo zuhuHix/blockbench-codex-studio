@@ -21,6 +21,8 @@ import {
 } from "./image-providers.js";
 import { ReferenceStore } from "./reference-store.js";
 import { VariantStore } from "./variant-store.js";
+import { TextureDestinationStore } from "./texture-destinations.js";
+import { revealInFileManager } from "./reveal.js";
 
 const chatMessageSchema = z.object({
   prompt: z.string(),
@@ -57,6 +59,7 @@ export function createStudioApp(
   const chats = new ChatManager();
   const references = new ReferenceStore();
   const variants = new VariantStore();
+  const destinations = new TextureDestinationStore();
 
   app.post("/bridge/chat/sessions", authenticate, (_request, response) => {
     response.status(201).json({ sessionId: chats.create() });
@@ -219,6 +222,100 @@ export function createStudioApp(
   app.get("/bridge/image-references", authenticate, (_request, response) => {
     response.json({ references: references.list() });
   });
+
+  function activeProject() {
+    const snapshot = store.get();
+    if (snapshot === undefined)
+      throw new Error("Blockbench has not published a project yet.");
+    return snapshot.project;
+  }
+
+  app.get("/bridge/texture-destination", authenticate, (_request, response) => {
+    try {
+      const project = activeProject();
+      response.json(destinations.status(project.id, project.filePath));
+    } catch (error) {
+      response.status(409).json({
+        error: error instanceof Error ? error.message : "No active project.",
+      });
+    }
+  });
+
+  app.post("/bridge/texture-destination", authenticate, (request, response) => {
+    const body = request.body as { absolutePath?: unknown; create?: unknown };
+    try {
+      const project = activeProject();
+      if (typeof body.absolutePath !== "string")
+        throw new Error("Provide the absolute texture folder path.");
+      response.json(
+        destinations.set(project.id, body.absolutePath, {
+          create: body.create === true,
+          ...(project.filePath === undefined
+            ? {}
+            : { projectFilePath: project.filePath }),
+        }),
+      );
+    } catch (error) {
+      response.status(400).json({
+        error: error instanceof Error ? error.message : "Destination rejected.",
+      });
+    }
+  });
+
+  app.post(
+    "/bridge/texture-destination/reveal",
+    authenticate,
+    (_request, response) => {
+      try {
+        const project = activeProject();
+        const destination = destinations.status(project.id, project.filePath);
+        if (destination.absolutePath === null || !destination.exists)
+          throw new Error("There is no existing folder to reveal.");
+        revealInFileManager(destination.absolutePath);
+        response.json({ revealed: destination.absolutePath });
+      } catch (error) {
+        response.status(400).json({
+          error: error instanceof Error ? error.message : "Reveal failed.",
+        });
+      }
+    },
+  );
+
+  app.post(
+    "/bridge/image-variants/:id/save",
+    authenticate,
+    (request, response) => {
+      const body = request.body as { fileName?: unknown };
+      try {
+        const project = activeProject();
+        const variant = variants.get(String(request.params.id));
+        response.status(201).json(
+          destinations.save({
+            projectId: project.id,
+            projectFilePath: project.filePath,
+            fileName:
+              typeof body.fileName === "string" && body.fileName.trim() !== ""
+                ? body.fileName
+                : variant.name,
+            bytes: Buffer.from(variants.payload(variant.id), "base64"),
+            provenance: {
+              variantId: variant.id,
+              prompt: variant.prompt,
+              mode: variant.mode,
+              provider: variant.providerId,
+              ...(variant.seed === undefined ? {} : { seed: variant.seed }),
+              width: variant.width,
+              height: variant.height,
+            },
+          }),
+        );
+      } catch (error) {
+        response.status(400).json({
+          error: error instanceof Error ? error.message : "Save failed.",
+        });
+      }
+    },
+  );
 
   app.post("/bridge/snapshot", authenticate, (request, response) => {
     const parsed = blockbenchSnapshotSchema.safeParse(request.body);

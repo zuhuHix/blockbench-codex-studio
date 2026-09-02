@@ -11,6 +11,7 @@ import {
 import { ReferenceStore } from "./reference-store.js";
 import { planImageGeneration } from "./image-requests.js";
 import { VariantStore } from "./variant-store.js";
+import { TextureDestinationStore } from "./texture-destinations.js";
 import {
   bounds3Schema,
   cubeFaceNameSchema,
@@ -91,6 +92,7 @@ export function createMcpServer(
   imageProbes: ImageProviderProbes = defaultImageProviderProbes,
   references = new ReferenceStore(),
   variants = new VariantStore(),
+  destinations = new TextureDestinationStore(),
 ): McpServer {
   const server = new McpServer({
     name: "blockbench-codex-studio",
@@ -710,6 +712,77 @@ export function createMcpServer(
           dataBase64: variants.payload(variantId),
           width: variant.width,
           height: variant.height,
+        }),
+      );
+    },
+  );
+
+  server.registerTool(
+    "get_texture_destination",
+    {
+      description:
+        "Report the remembered texture folder for the active project, whether it is writable, and suggested Minecraft folders.",
+      annotations: probeAnnotations,
+    },
+    () => {
+      const project = requireSnapshot(store).project;
+      return jsonContent(destinations.status(project.id, project.filePath));
+    },
+  );
+
+  server.registerTool(
+    "set_texture_destination",
+    {
+      description:
+        "Remember an absolute texture folder for the active project. Existing files are never overwritten by later saves.",
+      annotations: draftAnnotations,
+      inputSchema: {
+        absolutePath: z.string().min(1),
+        create: z.boolean().default(false),
+      },
+    },
+    ({ absolutePath, create }) => {
+      const project = requireSnapshot(store).project;
+      return jsonContent(
+        destinations.set(project.id, absolutePath, {
+          create,
+          ...(project.filePath === undefined
+            ? {}
+            : { projectFilePath: project.filePath }),
+        }),
+      );
+    },
+  );
+
+  server.registerTool(
+    "save_image_variant",
+    {
+      description:
+        "Write a generated variant into the remembered texture folder with a sanitized, unique file name. Nothing is overwritten and nothing is imported into Blockbench.",
+      annotations: draftAnnotations,
+      inputSchema: {
+        variantId: z.string().min(1),
+        fileName: z.string().min(1).max(80).optional(),
+      },
+    },
+    ({ variantId, fileName }) => {
+      const project = requireSnapshot(store).project;
+      const variant = variants.get(variantId);
+      return jsonContent(
+        destinations.save({
+          projectId: project.id,
+          projectFilePath: project.filePath,
+          fileName: fileName ?? variant.name,
+          bytes: Buffer.from(variants.payload(variantId), "base64"),
+          provenance: {
+            variantId: variant.id,
+            prompt: variant.prompt,
+            mode: variant.mode,
+            provider: variant.providerId,
+            ...(variant.seed === undefined ? {} : { seed: variant.seed }),
+            width: variant.width,
+            height: variant.height,
+          },
         }),
       );
     },

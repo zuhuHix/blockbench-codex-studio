@@ -6,6 +6,8 @@ import type {
   ImageReference,
   ImageReferenceRole,
   ImageVariant,
+  SavedTexture,
+  TextureDestination,
 } from "@blockbench-codex/contracts";
 
 export interface BridgeSettings {
@@ -233,4 +235,45 @@ export async function fetchImageReferences(
     "GET",
   );
   return result.references;
+}
+
+export function fetchTextureDestination(
+  settings: BridgeSettings,
+): Promise<TextureDestination> {
+  return requestJson(settings, "/bridge/texture-destination", "GET");
+}
+
+export function setTextureDestination(
+  settings: BridgeSettings,
+  absolutePath: string,
+  create = false,
+): Promise<TextureDestination> {
+  return requestJson(settings, "/bridge/texture-destination", "POST", {
+    absolutePath,
+    create,
+  });
+}
+
+export function revealTextureDestination(
+  settings: BridgeSettings,
+): Promise<{ revealed: string }> {
+  return requestJson(
+    settings,
+    "/bridge/texture-destination/reveal",
+    "POST",
+    {},
+  );
+}
+
+export function saveVariant(
+  settings: BridgeSettings,
+  variantId: string,
+  fileName?: string,
+): Promise<SavedTexture> {
+  return requestJson(
+    settings,
+    `/bridge/image-variants/${variantId}/save`,
+    "POST",
+    fileName === undefined ? {} : { fileName },
+  );
 }

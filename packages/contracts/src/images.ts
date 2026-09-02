@@ -146,6 +146,35 @@ export const imageVariantImageSchema = z.object({
 export type ImageVariant = z.infer<typeof imageVariantSchema>;
 export type ImageVariantImage = z.infer<typeof imageVariantImageSchema>;
 
+export const textureDestinationSchema = z.object({
+  projectId: z.string().min(1),
+  /** Null until a folder has been chosen for this project. */
+  absolutePath: z.string().min(1).nullable(),
+  /** Path relative to the saved project file, when both are known. */
+  projectRelativePath: z.string().min(1).nullable(),
+  exists: z.boolean(),
+  writable: z.boolean(),
+  /** Reason the folder cannot be written to, when it cannot. */
+  detail: z.string().min(1),
+  /** Common Minecraft texture folders, offered but never enforced. */
+  suggestions: z.array(z.string().min(1)),
+});
+
+export const savedTextureSchema = z.object({
+  variantId: z.string().min(1),
+  fileName: z.string().min(1),
+  absolutePath: z.string().min(1),
+  projectRelativePath: z.string().min(1).nullable(),
+  byteLength: z.number().int().positive(),
+  /** True when the requested name was taken and a unique one was used. */
+  renamed: z.boolean(),
+  manifestPath: z.string().min(1).nullable(),
+  savedAt: z.iso.datetime(),
+});
+
+export type TextureDestination = z.infer<typeof textureDestinationSchema>;
+export type SavedTexture = z.infer<typeof savedTextureSchema>;
+
 export type ImageReferenceSource = z.infer<typeof imageReferenceSourceSchema>;
 export type ImageReferenceRole = z.infer<typeof imageReferenceRoleSchema>;
 export type ImageMimeType = z.infer<typeof imageMimeTypeSchema>;

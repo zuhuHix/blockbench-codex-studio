@@ -271,6 +271,9 @@ describe("studio HTTP app", () => {
         "record_image_variant",
         "list_image_variants",
         "use_variant_as_reference",
+        "get_texture_destination",
+        "set_texture_destination",
+        "save_image_variant",
       ]);
       expect(
         tools.tools.find((tool) => tool.name === "get_selection")?.annotations,
