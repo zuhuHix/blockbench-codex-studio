@@ -18,6 +18,7 @@ import {
   detectImageProviders,
   type ImageProviderProbes,
 } from "./image-providers.js";
+import { ReferenceStore } from "./reference-store.js";
 
 const chatMessageSchema = z.object({
   prompt: z.string(),
@@ -52,6 +53,7 @@ export function createStudioApp(
   const authenticate = createBearerAuth(token);
   const drafts = new DraftStore();
   const chats = new ChatManager();
+  const references = new ReferenceStore();
 
   app.post("/bridge/chat/sessions", authenticate, (_request, response) => {
     response.status(201).json({ sessionId: chats.create() });
@@ -161,7 +163,7 @@ export function createStudioApp(
   });
 
   app.post("/mcp", authenticate, async (request, response) => {
-    const server = createMcpServer(store, drafts, imageProbes);
+    const server = createMcpServer(store, drafts, imageProbes, references);
     const transport = new StreamableHTTPServerTransport({
       sessionIdGenerator: undefined,
     });

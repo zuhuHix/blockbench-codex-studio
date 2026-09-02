@@ -119,6 +119,14 @@ Cost-free backends are selected first, so nothing bills the account while a loca
 cmdkey /generic:BlockbenchCodexStudio:OpenAI /user:openai /pass
 ```
 
+## Phase 5 reference manager
+
+References are attached by name before any generation request is planned. `add_image_reference` takes the latest Blockbench capture when `source` is `viewport`; every other source supplies `mimeType`, `dataBase64`, `width`, and `height`. Payloads are validated against their declared format, capped at 8 MiB and 8 attachments, and never returned by `list_image_references` — tool results carry only names, provenance, roles, and sizes.
+
+Roles are `shape`, `palette`, `layout`, `style`, and `edit-target`. `plan_image_generation` returns the exact request that would be sent: the prompt, each reference with its role, the selected provider, whether it bills the account, and any warnings. Planning contacts no provider and imports nothing.
+
+The plan is `dispatchable: false` when a reference was detached or listed twice, when an editing mode (`edit-current-texture`, `inpaint-region`, `outpaint-extend`, `variation`, `pixel-art-conversion`) does not carry exactly one `edit-target`, or when no backend is configured. Advisory warnings, such as API cost or a decal without transparency, leave the plan dispatchable. Actual provider dispatch and the preview gallery arrive with the next Phase 5 slice.
+
 ## Workspace map
 
 - `apps/blockbench-plugin`: in-process Blockbench adapter and UI

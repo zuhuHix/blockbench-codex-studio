@@ -8,10 +8,17 @@ import {
   detectImageProviders,
   type ImageProviderProbes,
 } from "./image-providers.js";
+import { ReferenceStore } from "./reference-store.js";
+import { planImageGeneration } from "./image-requests.js";
 import {
   bounds3Schema,
   cubeFaceNameSchema,
   cubeFaceUvSchema,
+  imageGenerationModeSchema,
+  imageMimeTypeSchema,
+  imageReferenceRoleSchema,
+  imageReferenceSourceSchema,
+  imageSizeSchema,
   transactionIdSchema,
 } from "@blockbench-codex/contracts";
 import { z } from "zod";
@@ -80,6 +87,7 @@ export function createMcpServer(
   store: SnapshotStore,
   drafts: DraftStore,
   imageProbes: ImageProviderProbes = defaultImageProviderProbes,
+  references = new ReferenceStore(),
 ): McpServer {
   const server = new McpServer({
     name: "blockbench-codex-studio",
@@ -527,6 +535,120 @@ export function createMcpServer(
       annotations: probeAnnotations,
     },
     async () => jsonContent(await detectImageProviders(imageProbes)),
+  );
+
+  server.registerTool(
+    "add_image_reference",
+    {
+      description:
+        "Attach a named reference image for image generation. Use source 'viewport' to take the latest Blockbench capture, otherwise supply the image payload.",
+      annotations: draftAnnotations,
+      inputSchema: {
+        name: z.string().min(1).max(80),
+        source: imageReferenceSourceSchema,
+        role: imageReferenceRoleSchema,
+        mimeType: imageMimeTypeSchema.optional(),
+        dataBase64: z.string().min(1).optional(),
+        width: z.number().int().positive().max(4096).optional(),
+        height: z.number().int().positive().max(4096).optional(),
+      },
+    },
+    ({ name, source, role, mimeType, dataBase64, width, height }) => {
+      if (source === "viewport") {
+        const viewport = requireSnapshot(store).viewport;
+        if (viewport === undefined)
+          throw new Error(
+            "Blockbench has not published a viewport capture yet.",
+          );
+        return jsonContent(
+          references.add({
+            name,
+            source,
+            role,
+            mimeType: viewport.mimeType,
+            dataBase64: viewport.dataBase64,
+            width: viewport.width,
+            height: viewport.height,
+          }),
+        );
+      }
+      if (
+        dataBase64 === undefined ||
+        mimeType === undefined ||
+        width === undefined ||
+        height === undefined
+      )
+        throw new Error(
+          `Source ${source} requires mimeType, dataBase64, width, and height.`,
+        );
+      return jsonContent(
+        references.add({
+          name,
+          source,
+          role,
+          mimeType,
+          dataBase64,
+          width,
+          height,
+        }),
+      );
+    },
+  );
+
+  server.registerTool(
+    "list_image_references",
+    {
+      description:
+        "List the attached reference images with their names, sources, and roles. Image payloads are never returned.",
+      annotations: readOnlyAnnotations,
+    },
+    () => jsonContent({ references: references.list() }),
+  );
+
+  server.registerTool(
+    "remove_image_reference",
+    {
+      description: "Detach one reference image, or every reference at once.",
+      annotations: draftAnnotations,
+      inputSchema: {
+        referenceId: z.string().min(1).optional(),
+        all: z.boolean().default(false),
+      },
+    },
+    ({ referenceId, all }) => {
+      if (all) return jsonContent({ removed: references.clear() });
+      if (referenceId === undefined)
+        throw new Error("Provide a referenceId or set all to true.");
+      return jsonContent({
+        removed: 1,
+        reference: references.remove(referenceId),
+      });
+    },
+  );
+
+  server.registerTool(
+    "plan_image_generation",
+    {
+      description:
+        "Describe exactly which prompt, references, roles, and provider a generation request would use. Contacts no provider and imports nothing.",
+      annotations: probeAnnotations,
+      inputSchema: {
+        mode: imageGenerationModeSchema,
+        prompt: z.string().min(1).max(2000),
+        referenceIds: z.array(z.string().min(1)).max(8).default([]),
+        size: imageSizeSchema.default({ width: 512, height: 512 }),
+        transparentBackground: z.boolean().default(false),
+        seed: z.number().int().nonnegative().optional(),
+      },
+    },
+    async (request) =>
+      jsonContent(
+        planImageGeneration(
+          request,
+          references,
+          await detectImageProviders(imageProbes),
+        ),
+      ),
   );
 
   return server;

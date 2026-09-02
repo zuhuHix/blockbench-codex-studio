@@ -187,6 +187,10 @@ describe("studio HTTP app", () => {
         "pack_uv_islands",
         "normalize_texel_density",
         "detect_image_providers",
+        "add_image_reference",
+        "list_image_references",
+        "remove_image_reference",
+        "plan_image_generation",
       ]);
       expect(
         tools.tools.find((tool) => tool.name === "get_selection")?.annotations,
