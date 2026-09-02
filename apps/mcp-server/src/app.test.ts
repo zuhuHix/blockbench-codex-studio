@@ -135,6 +135,14 @@ describe("studio HTTP app", () => {
         "connect_selected_chain",
         "inspect_connectivity",
       ]);
+      expect(
+        tools.tools.find((tool) => tool.name === "get_selection")?.annotations,
+      ).toEqual({
+        readOnlyHint: true,
+        destructiveHint: false,
+        idempotentHint: true,
+        openWorldHint: false,
+      });
       const result = await client.callTool({
         name: "get_project_summary",
         arguments: {},
