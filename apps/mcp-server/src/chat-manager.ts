@@ -1,7 +1,7 @@
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
-import { existsSync } from "node:fs";
-import { join } from "node:path";
 import { randomUUID } from "node:crypto";
+
+import { providerForModel, type AgentProvider } from "./agent-providers.js";
 
 export type ChatEvent = {
   readonly id: number;
@@ -13,30 +13,12 @@ export type ChatEvent = {
 
 type ChatSession = {
   readonly id: string;
-  codexThreadId?: string;
+  providerId?: string;
+  resumeKey?: string;
   process?: ChildProcessWithoutNullStreams;
   nextEventId: number;
   events: ChatEvent[];
 };
-
-const allowedModels = new Set(["gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna"]);
-
-function codexEntrypoint(): string {
-  const appData = process.env.APPDATA;
-  if (appData === undefined) throw new Error("APPDATA is unavailable.");
-  const entrypoint = join(
-    appData,
-    "npm",
-    "node_modules",
-    "@openai",
-    "codex",
-    "bin",
-    "codex.js",
-  );
-  if (!existsSync(entrypoint))
-    throw new Error("The Codex CLI is not installed.");
-  return entrypoint;
-}
 
 export class ChatManager {
   readonly #sessions = new Map<string, ChatSession>();
@@ -60,39 +42,36 @@ export class ChatManager {
   ): void {
     const session = this.#session(sessionId);
     if (session.process !== undefined)
-      throw new Error("Codex is already working.");
-    if (!allowedModels.has(model)) throw new Error("Unsupported Codex model.");
+      throw new Error("The assistant is already working.");
+    const provider = providerForModel(model);
+    if (session.providerId !== undefined && session.providerId !== provider.id)
+      throw new Error(
+        "Start a new chat to switch between Codex and Claude models.",
+      );
     const cleanPrompt = prompt.trim();
     if (cleanPrompt.length === 0 || cleanPrompt.length > 20_000)
       throw new Error("Prompt must contain between 1 and 20,000 characters.");
 
-    const isNew = session.codexThreadId === undefined;
-    const base = isNew ? ["exec"] : ["exec", "resume", session.codexThreadId!];
-    const args = [
-      codexEntrypoint(),
-      ...base,
-      "-",
-      "--json",
-      "--model",
-      model,
-      ...(isNew ? ["--sandbox", "read-only"] : []),
-      "--skip-git-repo-check",
-      "--ignore-user-config",
-      "--ignore-rules",
-      "-c",
-      'approval_policy="never"',
-      "-c",
-      `mcp_servers.blockbench-codex-studio.url="http://127.0.0.1:${port}/mcp"`,
-      "-c",
-      'mcp_servers.blockbench-codex-studio.bearer_token_env_var="BLOCKBENCH_CODEX_TOKEN"',
-    ];
-    const child = spawn(process.execPath, args, {
-      cwd: process.cwd(),
-      env: { ...process.env, BLOCKBENCH_CODEX_TOKEN: token },
-      stdio: ["pipe", "pipe", "pipe"],
-    });
+    const { command, args: prefix } = provider.entrypoint();
+    const child = spawn(
+      command,
+      [
+        ...prefix,
+        ...provider.buildArguments({
+          model,
+          port,
+          resumeKey: session.resumeKey,
+        }),
+      ],
+      {
+        cwd: process.cwd(),
+        env: { ...process.env, BLOCKBENCH_CODEX_TOKEN: token },
+        stdio: ["pipe", "pipe", "pipe"],
+      },
+    );
+    session.providerId = provider.id;
     session.process = child;
-    this.#push(session, "status", "Codex is working");
+    this.#push(session, "status", provider.busyMessage);
     child.stdin.end(cleanPrompt);
 
     let stdout = "";
@@ -101,7 +80,7 @@ export class ChatManager {
       stdout += chunk;
       const lines = stdout.split(/\r?\n/u);
       stdout = lines.pop() ?? "";
-      for (const line of lines) this.#consume(session, line);
+      for (const line of lines) this.#consume(session, provider, line);
     });
     let stderr = "";
     child.stderr.setEncoding("utf8");
@@ -109,14 +88,14 @@ export class ChatManager {
       stderr = (stderr + chunk).slice(-4_000);
     });
     child.on("close", (code) => {
-      if (stdout.trim() !== "") this.#consume(session, stdout);
+      if (stdout.trim() !== "") this.#consume(session, provider, stdout);
       session.process = undefined;
       if (code === 0) this.#push(session, "done", "Ready");
       else
         this.#push(
           session,
           "error",
-          stderr.trim() || `Codex exited with code ${code}.`,
+          stderr.trim() || `The assistant exited with code ${code}.`,
         );
     });
     child.on("error", (error) => {
@@ -128,20 +107,18 @@ export class ChatManager {
   stop(sessionId: string): void {
     const session = this.#session(sessionId);
     session.process?.kill();
-    this.#push(session, "status", "Stopping Codex");
+    this.#push(session, "status", "Stopping the assistant");
   }
 
-  #consume(session: ChatSession, line: string): void {
+  #consume(session: ChatSession, provider: AgentProvider, line: string): void {
     try {
-      const event = JSON.parse(line) as Record<string, unknown>;
-      const threadId = event.thread_id;
-      if (typeof threadId === "string") session.codexThreadId = threadId;
-      const item = event.item as Record<string, unknown> | undefined;
-      const text = item?.text;
-      if (item?.type === "agent_message" && typeof text === "string") {
-        this.#push(session, "assistant", text);
+      const raw = JSON.parse(line) as Record<string, unknown>;
+      const event = provider.parseEvent(raw);
+      if (event.sessionKey !== undefined) session.resumeKey = event.sessionKey;
+      if (event.assistantText !== undefined) {
+        this.#push(session, "assistant", event.assistantText);
       } else {
-        this.#push(session, "tool", undefined, event);
+        this.#push(session, "tool", undefined, raw);
       }
     } catch {
       this.#push(session, "tool", line);
