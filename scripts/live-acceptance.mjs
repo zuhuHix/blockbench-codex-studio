@@ -49,6 +49,39 @@ try {
       transactionId: staged.draft.transactionId,
     });
     console.log(JSON.stringify({ staged, validation }, null, 2));
+  } else if (action === "uv-inspect") {
+    const selection = await call("get_selection");
+    const faceMappings = [];
+    for (const element of selection.elements) {
+      faceMappings.push(
+        await call("get_cube_face_uvs", { elementId: element.id }),
+      );
+    }
+    console.log(
+      JSON.stringify(
+        {
+          project: await call("get_project_summary"),
+          selection,
+          faceMappings,
+          coverage: await call("measure_uv_coverage"),
+          seams: await call("audit_uv_seams"),
+        },
+        null,
+        2,
+      ),
+    );
+  } else if (action === "uv-stage") {
+    const before = {
+      coverage: await call("measure_uv_coverage"),
+      seams: await call("audit_uv_seams"),
+    };
+    const staged = await call("project_connected_uv", {
+      label: "Project continuous selected UVs",
+    });
+    const validation = await call("validate_draft", {
+      transactionId: staged.draft.transactionId,
+    });
+    console.log(JSON.stringify({ before, staged, validation }, null, 2));
   } else if (action === "commit") {
     if (!argument) throw new Error("commit requires a transaction ID.");
     console.log(

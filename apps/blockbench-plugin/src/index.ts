@@ -19,6 +19,7 @@ let applyingCommand = false;
 let assistantPanel: Panel | undefined;
 let assistantStyles: { delete(): void } | undefined;
 let companionStart: Promise<void> | undefined;
+let ownedCompanion: ChildProcess.ChildProcess | undefined;
 
 function delay(milliseconds: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, milliseconds));
@@ -48,7 +49,6 @@ async function ensureCompanion(settings: BridgeSettings): Promise<void> {
       "Blockbench process-environment permission was not granted.",
     );
   const companion = childProcess.spawn("node", [__STUDIO_SERVER_SCRIPT__], {
-    detached: true,
     windowsHide: true,
     stdio: "ignore",
     env: {
@@ -57,8 +57,13 @@ async function ensureCompanion(settings: BridgeSettings): Promise<void> {
       BLOCKBENCH_CODEX_PORT: String(settings.port),
     },
   });
-  companion.once("error", () => undefined);
-  companion.unref();
+  ownedCompanion = companion;
+  companion.once("error", () => {
+    if (ownedCompanion === companion) ownedCompanion = undefined;
+  });
+  companion.once("exit", () => {
+    if (ownedCompanion === companion) ownedCompanion = undefined;
+  });
   for (let attempt = 0; attempt < 20; attempt += 1) {
     await delay(250);
     try {
@@ -221,6 +226,8 @@ Plugin.register("blockbench_codex_studio", {
   },
   onunload() {
     if (publishTimer !== undefined) clearInterval(publishTimer);
+    ownedCompanion?.kill();
+    ownedCompanion = undefined;
     configureAction?.delete();
     captureAction?.delete();
     assistantPanel?.delete();
