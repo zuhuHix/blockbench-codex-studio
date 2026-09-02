@@ -17,6 +17,7 @@ import { ChatManager } from "./chat-manager.js";
 const chatMessageSchema = z.object({
   prompt: z.string(),
   model: z.string().optional(),
+  effort: z.string().optional(),
 });
 
 export interface StudioServerOptions {
@@ -82,6 +83,7 @@ export function createStudioApp(
           message.model ?? "gpt-5.6-terra",
           port,
           token,
+          message.effort,
         );
         response.status(202).json({ accepted: true });
       } catch (error) {

@@ -8,6 +8,7 @@ export interface ProviderEvent {
 
 export interface BuildOptions {
   readonly model: string;
+  readonly effort: string;
   readonly port: number;
   readonly resumeKey?: string;
 }
@@ -15,6 +16,8 @@ export interface BuildOptions {
 export interface AgentProvider {
   readonly id: string;
   readonly models: readonly string[];
+  /** Reasoning effort levels this CLI accepts, cheapest first. */
+  readonly efforts: readonly string[];
   readonly busyMessage: string;
   /** Executable plus any leading arguments needed to reach the CLI. */
   entrypoint(): { readonly command: string; readonly args: readonly string[] };
@@ -33,6 +36,7 @@ function npmGlobalPackage(...segments: readonly string[]): string {
 const codexProvider: AgentProvider = {
   id: "codex",
   models: ["gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna"],
+  efforts: ["minimal", "low", "medium", "high", "xhigh"],
   busyMessage: "Codex is working",
 
   entrypoint() {
@@ -41,7 +45,7 @@ const codexProvider: AgentProvider = {
     return { command: process.execPath, args: [script] };
   },
 
-  buildArguments({ model, port, resumeKey }) {
+  buildArguments({ model, effort, port, resumeKey }) {
     const isNew = resumeKey === undefined;
     return [
       ...(isNew ? ["exec"] : ["exec", "resume", resumeKey]),
@@ -53,6 +57,8 @@ const codexProvider: AgentProvider = {
       "--skip-git-repo-check",
       "--ignore-user-config",
       "--ignore-rules",
+      "-c",
+      `model_reasoning_effort="${effort}"`,
       "-c",
       'approval_policy="never"',
       "-c",
@@ -79,6 +85,7 @@ const codexProvider: AgentProvider = {
 const claudeProvider: AgentProvider = {
   id: "claude",
   models: ["claude-opus-5", "claude-sonnet-5", "claude-haiku-4-5"],
+  efforts: ["low", "medium", "high", "xhigh", "max"],
   busyMessage: "Claude is working",
 
   entrypoint() {
@@ -93,7 +100,7 @@ const claudeProvider: AgentProvider = {
     return { command: executable, args: [] };
   },
 
-  buildArguments({ model, port, resumeKey }) {
+  buildArguments({ model, effort, port, resumeKey }) {
     const mcpConfig = JSON.stringify({
       mcpServers: {
         [mcpServerName]: {
@@ -110,6 +117,8 @@ const claudeProvider: AgentProvider = {
       "--verbose",
       "--model",
       model,
+      "--effort",
+      effort,
       ...(resumeKey === undefined ? [] : ["--resume", resumeKey]),
       "--mcp-config",
       mcpConfig,
@@ -146,6 +155,19 @@ export const agentProviders: readonly AgentProvider[] = [
   codexProvider,
   claudeProvider,
 ];
+
+export function resolveEffort(
+  provider: AgentProvider,
+  effort?: string,
+): string {
+  if (effort === undefined)
+    return provider.efforts.includes("medium")
+      ? "medium"
+      : provider.efforts[0]!;
+  if (!provider.efforts.includes(effort))
+    throw new Error(`Unsupported effort level for ${provider.id}.`);
+  return effort;
+}
 
 export function providerForModel(model: string): AgentProvider {
   const provider = agentProviders.find((candidate) =>

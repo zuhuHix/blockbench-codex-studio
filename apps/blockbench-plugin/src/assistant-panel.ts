@@ -12,6 +12,52 @@ import {
 import { captureSnapshot, captureViewport } from "./snapshot.js";
 
 const modelKey = "blockbench_codex_model";
+const providerKey = "blockbench_codex_provider";
+const effortKey = "blockbench_codex_effort";
+
+type ProviderOption = {
+  readonly id: string;
+  readonly label: string;
+  readonly icon: string;
+  readonly models: ReadonlyArray<{
+    value: string;
+    label: string;
+    hint: string;
+  }>;
+  readonly efforts: readonly string[];
+  readonly defaultEffort: string;
+};
+
+const providers: readonly ProviderOption[] = [
+  {
+    id: "codex",
+    label: "Codex",
+    icon: "bolt",
+    models: [
+      { value: "gpt-5.6-sol", label: "Sol", hint: "Quality" },
+      { value: "gpt-5.6-terra", label: "Terra", hint: "Balanced" },
+      { value: "gpt-5.6-luna", label: "Luna", hint: "Fast" },
+    ],
+    efforts: ["minimal", "low", "medium", "high", "xhigh"],
+    defaultEffort: "medium",
+  },
+  {
+    id: "claude",
+    label: "Claude",
+    icon: "auto_awesome",
+    models: [
+      { value: "claude-opus-5", label: "Opus 5", hint: "Quality" },
+      { value: "claude-sonnet-5", label: "Sonnet 5", hint: "Balanced" },
+      { value: "claude-haiku-4-5", label: "Haiku 4.5", hint: "Fast" },
+    ],
+    efforts: ["low", "medium", "high", "xhigh", "max"],
+    defaultEffort: "medium",
+  },
+];
+
+function providerById(id: string): ProviderOption {
+  return providers.find((entry) => entry.id === id) ?? providers[0]!;
+}
 
 export function createAssistantPanel(
   settings: () => BridgeSettings | undefined,
@@ -32,7 +78,9 @@ export function createAssistantPanel(
       data() {
         return {
           prompt: "",
+          providerId: localStorage.getItem(providerKey) ?? "codex",
           model: localStorage.getItem(modelKey) ?? "gpt-5.6-terra",
+          effort: localStorage.getItem(effortKey) ?? "medium",
           modelMenuOpen: false,
           sessionId: "",
           events: [] as ChatEvent[],
@@ -48,6 +96,14 @@ export function createAssistantPanel(
         };
       },
       computed: {
+        provider(): ProviderOption {
+          return providerById(this.providerId);
+        },
+        otherProvider(): ProviderOption {
+          return providers.find(
+            (entry) => entry.id !== this.providerId,
+          ) as ProviderOption;
+        },
         selection(): readonly BlockbenchNode[] {
           return Cube.selected;
         },
@@ -128,6 +184,23 @@ export function createAssistantPanel(
             this.connected = false;
           }
         },
+        async switchProvider() {
+          if (this.working) return;
+          const next = this.otherProvider;
+          this.providerId = next.id;
+          this.model = next.models[1]!.value;
+          this.effort = next.defaultEffort;
+          localStorage.setItem(providerKey, this.providerId);
+          localStorage.setItem(modelKey, this.model);
+          localStorage.setItem(effortKey, this.effort);
+          // A session is pinned to the provider that started it, so a
+          // provider switch always begins a fresh conversation.
+          await this.newChat(false);
+          this.messages.push({
+            role: "status",
+            text: `Switched to ${next.label}. Started a new chat.`,
+          });
+        },
         async send() {
           const text = this.prompt.trim();
           const bridge = settings();
@@ -151,12 +224,14 @@ export function createAssistantPanel(
           this.prompt = "";
           this.working = true;
           localStorage.setItem(modelKey, this.model);
+          localStorage.setItem(effortKey, this.effort);
           try {
             await sendChatMessage(
               bridge,
               this.sessionId,
               `${context}\n\nUser request: ${text}`,
               this.model,
+              this.effort,
             );
           } catch (error) {
             this.working = false;
@@ -230,16 +305,16 @@ export function createAssistantPanel(
           <div class="bcs-status" :class="{offline:!connected}"><span></span>{{ connected ? (working ? 'Codex is working' : 'MCP connected') : 'Bridge offline' }}</div>
           <main class="bcs-timeline">
             <div v-if="!messages.length" class="bcs-welcome"><span class="material-icons">auto_awesome</span><h3>Design directly in Blockbench</h3><p>Describe a change, attach the viewport, or select model parts. The assistant can inspect, draft, validate, and apply through the MCP bridge.</p><div><button @click="prompt='Inspect my selection and suggest improvements'">Inspect selection</button><button @click="prompt='Make these parts form a connected chain'">Connect selection</button><button @click="capture">Attach viewport</button></div></div>
-            <article v-for="(message,index) in messages" :key="index" class="bcs-message" :class="message.role"><div class="bcs-message-heading"><b>{{ message.role==='you'?'You':message.role==='error'?'Error':'Codex' }}</b><button v-if="message.role==='codex'" title="Copy message" @click="copyMessage(message.text)"><span class="material-icons">content_copy</span></button></div><p>{{ message.text }}</p></article>
+            <article v-for="(message,index) in messages" :key="index" class="bcs-message" :class="message.role"><div class="bcs-message-heading"><b>{{ message.role==='you'?'You':message.role==='error'?'Error':message.role==='status'?'System':provider.label }}</b><button v-if="message.role==='codex'" title="Copy message" @click="copyMessage(message.text)"><span class="material-icons">content_copy</span></button></div><p>{{ message.text }}</p></article>
             <details v-if="toolEvents.length" class="bcs-events" :open="showDetails" @toggle="showDetails=$event.target.open"><summary><span class="material-icons">account_tree</span>{{ toolEvents.length }} MCP events</summary><div v-for="event in toolEvents" :key="event.id"><span>{{ eventLabel(event) }}</span><pre v-if="showDetails">{{ JSON.stringify(event.detail,null,2) }}</pre></div></details>
           </main>
-          <section class="bcs-context"><div class="bcs-chips"><span v-for="item in selection.slice(0,4)" :key="item.uuid" class="bcs-chip"><span class="material-icons">check_box</span>{{ item.name }}</span><span v-if="selection.length>4" class="bcs-chip">+{{ selection.length-4 }}</span><span v-if="viewportAttached" class="bcs-chip accent"><span class="material-icons">photo_camera</span>Viewport</span></div><div class="bcs-toolbar"><label><input type="checkbox" v-model="previewFirst"> Preview first</label><select v-model="model" :disabled="working" @mousedown="modelMenuOpen=true" @change="modelMenuOpen=false" @blur="modelMenuOpen=false"><optgroup label="Codex"><option value="gpt-5.6-sol">{{ modelMenuOpen ? 'Sol · Quality' : 'Sol' }}</option><option value="gpt-5.6-terra">{{ modelMenuOpen ? 'Terra · Balanced' : 'Terra' }}</option><option value="gpt-5.6-luna">{{ modelMenuOpen ? 'Luna · Fast' : 'Luna' }}</option></optgroup><optgroup label="Claude"><option value="claude-opus-5">{{ modelMenuOpen ? 'Opus 5 · Quality' : 'Opus 5' }}</option><option value="claude-sonnet-5">{{ modelMenuOpen ? 'Sonnet 5 · Balanced' : 'Sonnet 5' }}</option><option value="claude-haiku-4-5">{{ modelMenuOpen ? 'Haiku 4.5 · Fast' : 'Haiku 4.5' }}</option></optgroup></select></div></section>
+          <section class="bcs-context"><div class="bcs-chips"><span v-for="item in selection.slice(0,4)" :key="item.uuid" class="bcs-chip"><span class="material-icons">check_box</span>{{ item.name }}</span><span v-if="selection.length>4" class="bcs-chip">+{{ selection.length-4 }}</span><span v-if="viewportAttached" class="bcs-chip accent"><span class="material-icons">photo_camera</span>Viewport</span></div><div class="bcs-toolbar"><label><input type="checkbox" v-model="previewFirst"> Preview first</label><button class="bcs-provider" :disabled="working" @click="switchProvider" :title="'Using ' + provider.label + ' · click to switch to ' + otherProvider.label + ' (starts a new chat)'"><span class="material-icons">{{ provider.icon }}</span>{{ provider.label }}</button><select v-model="model" :disabled="working" @mousedown="modelMenuOpen=true" @change="modelMenuOpen=false" @blur="modelMenuOpen=false"><option v-for="entry in provider.models" :key="entry.value" :value="entry.value">{{ modelMenuOpen ? entry.label + ' · ' + entry.hint : entry.label }}</option></select><select v-model="effort" :disabled="working" title="Reasoning effort"><option v-for="level in provider.efforts" :key="level" :value="level">{{ level }}</option></select></div></section>
           <footer class="bcs-composer"><textarea v-model="prompt" :disabled="working" @keydown.enter.exact.prevent="send" placeholder="Describe what to build or change…"></textarea><button class="bcs-attach" :class="{active:viewportAttached}" @click="toggleViewport" :disabled="working" :title="viewportAttached?'Remove attached viewport':'Attach current viewport'"><span class="material-icons">{{ viewportAttached ? 'close' : 'photo_camera' }}</span></button><button v-if="working" class="bcs-send stop" @click="stop" title="Stop"><span class="material-icons">stop</span></button><button v-else class="bcs-send" @click="send" :disabled="!prompt.trim()||!connected" title="Send"><span class="material-icons">arrow_upward</span></button><button class="bcs-undo" @click="undo"><span class="material-icons">undo</span> Undo</button></footer>
         </div>`,
     } as any,
   });
   const styles = Blockbench.addCSS(`
-    .bcs-shell{height:100%;min-height:0;display:flex;flex-direction:column;background:var(--color-ui);color:var(--color-text);font-size:12px}.bcs-header{display:flex;align-items:center;padding:10px 5px 7px 11px;border-bottom:1px solid var(--color-border)}.bcs-brand{display:flex;align-items:center;gap:8px;min-width:0}.bcs-brand>.material-icons{color:var(--color-accent);font-size:24px}.bcs-brand div{display:flex;flex-direction:column;min-width:0}.bcs-brand strong{font-size:14px}.bcs-brand small{opacity:.62;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.bcs-header-actions{display:flex;gap:0;margin-left:auto}.bcs-header-actions button{width:26px;height:28px}.bcs-header-actions button,.bcs-toolbar button{padding:0;border:0;background:transparent}.bcs-toolbar button{width:30px;height:30px}.bcs-header-actions button:hover,.bcs-toolbar button:hover{background:var(--color-button)}.bcs-header-actions .material-icons,.bcs-toolbar .material-icons{font-size:18px}.bcs-status{display:flex;align-items:center;gap:6px;padding:5px 12px;background:color-mix(in srgb,var(--color-accent) 9%,transparent);font-size:11px}.bcs-status>span{width:7px;height:7px;border-radius:50%;background:#5fd48b}.bcs-status.offline>span{background:#e06565}.bcs-timeline{flex:1;min-height:120px;overflow:auto;padding:12px;display:flex;flex-direction:column;gap:10px}.bcs-welcome{margin:auto;max-width:340px;text-align:center}.bcs-welcome>.material-icons{font-size:34px;color:var(--color-accent)}.bcs-welcome h3{margin:5px}.bcs-welcome p{margin:0 0 12px;opacity:.7;line-height:1.45}.bcs-welcome div{display:flex;justify-content:center;flex-wrap:wrap;gap:5px}.bcs-welcome button{font-size:11px;border:1px solid var(--color-border);background:var(--color-back);border-radius:14px;padding:4px 8px}.bcs-message{max-width:92%;padding:8px 10px;border-radius:8px;background:var(--color-back);line-height:1.42}.bcs-message.you{align-self:flex-end;background:color-mix(in srgb,var(--color-accent) 22%,var(--color-back))}.bcs-message.error{border-left:3px solid #e06565}.bcs-message b{font-size:10px;text-transform:uppercase;opacity:.6}.bcs-message p{white-space:pre-wrap;margin:3px 0 0}.bcs-events{border:1px solid var(--color-border);border-radius:6px;padding:5px 7px;opacity:.78}.bcs-events summary{cursor:pointer}.bcs-events summary .material-icons{font-size:15px;vertical-align:-3px;margin-right:5px}.bcs-events>div{padding:4px 2px;border-top:1px solid var(--color-border)}.bcs-events pre{max-height:150px;overflow:auto;white-space:pre-wrap;font-size:9px}.bcs-context{border-top:1px solid var(--color-border);padding:7px 9px 5px;background:var(--color-back)}.bcs-chips{display:flex;gap:4px;overflow:hidden;margin-bottom:5px}.bcs-chip{display:inline-flex;align-items:center;gap:3px;min-width:0;max-width:130px;padding:2px 6px;border-radius:10px;background:var(--color-button);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-size:10px}.bcs-chip .material-icons{font-size:12px}.bcs-chip.accent{color:var(--color-accent)}.bcs-toolbar{display:flex;align-items:center;gap:7px}.bcs-toolbar label{display:flex;align-items:center;gap:3px;white-space:nowrap}.bcs-toolbar select{margin-left:auto;max-width:130px;height:27px;font-size:11px}.bcs-composer{position:relative;padding:7px 9px 10px;background:var(--color-back)}.bcs-composer textarea{box-sizing:border-box;width:100%;min-height:72px;max-height:170px;resize:vertical;padding:9px 34px 25px 9px;border:1px solid var(--color-border);border-radius:8px;background:var(--color-ui);color:var(--color-text)}.bcs-send{position:absolute;right:15px;top:17px;width:22px;height:22px;padding:0;border-radius:50%;background:var(--color-accent);color:var(--color-accent_text)}.bcs-send.stop{background:#d65e5e}.bcs-send .material-icons{font-size:14px}.bcs-undo{position:absolute;left:14px;bottom:13px;height:23px;padding:1px 6px;border:0;background:transparent;opacity:.72;font-size:10px}.bcs-undo .material-icons{font-size:13px;vertical-align:-3px}
+    .bcs-shell{height:100%;min-height:0;display:flex;flex-direction:column;background:var(--color-ui);color:var(--color-text);font-size:12px}.bcs-header{display:flex;align-items:center;padding:10px 5px 7px 11px;border-bottom:1px solid var(--color-border)}.bcs-brand{display:flex;align-items:center;gap:8px;min-width:0}.bcs-brand>.material-icons{color:var(--color-accent);font-size:24px}.bcs-brand div{display:flex;flex-direction:column;min-width:0}.bcs-brand strong{font-size:14px}.bcs-brand small{opacity:.62;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.bcs-header-actions{display:flex;gap:0;margin-left:auto}.bcs-header-actions button{width:26px;height:28px}.bcs-header-actions button,.bcs-toolbar button{padding:0;border:0;background:transparent}.bcs-toolbar button{width:30px;height:30px}.bcs-header-actions button:hover,.bcs-toolbar button:hover{background:var(--color-button)}.bcs-provider{width:auto!important;height:26px!important;display:inline-flex;align-items:center;gap:4px;padding:0 8px!important;border-radius:13px;background:var(--color-button)!important;font-size:11px;text-transform:uppercase;letter-spacing:.04em}.bcs-provider:hover{background:var(--color-accent)!important;color:var(--color-light)}.bcs-provider .material-icons{font-size:15px}.bcs-provider:disabled{opacity:.5}.bcs-message.status{opacity:.75;font-style:italic}.bcs-header-actions .material-icons,.bcs-toolbar .material-icons{font-size:18px}.bcs-status{display:flex;align-items:center;gap:6px;padding:5px 12px;background:color-mix(in srgb,var(--color-accent) 9%,transparent);font-size:11px}.bcs-status>span{width:7px;height:7px;border-radius:50%;background:#5fd48b}.bcs-status.offline>span{background:#e06565}.bcs-timeline{flex:1;min-height:120px;overflow:auto;padding:12px;display:flex;flex-direction:column;gap:10px}.bcs-welcome{margin:auto;max-width:340px;text-align:center}.bcs-welcome>.material-icons{font-size:34px;color:var(--color-accent)}.bcs-welcome h3{margin:5px}.bcs-welcome p{margin:0 0 12px;opacity:.7;line-height:1.45}.bcs-welcome div{display:flex;justify-content:center;flex-wrap:wrap;gap:5px}.bcs-welcome button{font-size:11px;border:1px solid var(--color-border);background:var(--color-back);border-radius:14px;padding:4px 8px}.bcs-message{max-width:92%;padding:8px 10px;border-radius:8px;background:var(--color-back);line-height:1.42}.bcs-message.you{align-self:flex-end;background:color-mix(in srgb,var(--color-accent) 22%,var(--color-back))}.bcs-message.error{border-left:3px solid #e06565}.bcs-message b{font-size:10px;text-transform:uppercase;opacity:.6}.bcs-message p{white-space:pre-wrap;margin:3px 0 0}.bcs-events{border:1px solid var(--color-border);border-radius:6px;padding:5px 7px;opacity:.78}.bcs-events summary{cursor:pointer}.bcs-events summary .material-icons{font-size:15px;vertical-align:-3px;margin-right:5px}.bcs-events>div{padding:4px 2px;border-top:1px solid var(--color-border)}.bcs-events pre{max-height:150px;overflow:auto;white-space:pre-wrap;font-size:9px}.bcs-context{border-top:1px solid var(--color-border);padding:7px 9px 5px;background:var(--color-back)}.bcs-chips{display:flex;gap:4px;overflow:hidden;margin-bottom:5px}.bcs-chip{display:inline-flex;align-items:center;gap:3px;min-width:0;max-width:130px;padding:2px 6px;border-radius:10px;background:var(--color-button);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-size:10px}.bcs-chip .material-icons{font-size:12px}.bcs-chip.accent{color:var(--color-accent)}.bcs-toolbar{display:flex;align-items:center;gap:7px}.bcs-toolbar label{display:flex;align-items:center;gap:3px;white-space:nowrap}.bcs-toolbar select{margin-left:auto;max-width:130px;height:27px;font-size:11px}.bcs-composer{position:relative;padding:7px 9px 10px;background:var(--color-back)}.bcs-composer textarea{box-sizing:border-box;width:100%;min-height:72px;max-height:170px;resize:vertical;padding:9px 34px 25px 9px;border:1px solid var(--color-border);border-radius:8px;background:var(--color-ui);color:var(--color-text)}.bcs-send{position:absolute;right:15px;top:17px;width:22px;height:22px;padding:0;border-radius:50%;background:var(--color-accent);color:var(--color-accent_text)}.bcs-send.stop{background:#d65e5e}.bcs-send .material-icons{font-size:14px}.bcs-undo{position:absolute;left:14px;bottom:13px;height:23px;padding:1px 6px;border:0;background:transparent;opacity:.72;font-size:10px}.bcs-undo .material-icons{font-size:13px;vertical-align:-3px}
     .bcs-welcome button{min-height:22px;height:22px;font-size:10px;line-height:20px;border-radius:11px;padding:0 9px}
     .bcs-shell .bcs-header-actions{gap:0!important}
     .bcs-shell .bcs-header-actions button{box-sizing:border-box!important;min-width:24px!important;width:24px!important;max-width:24px!important;height:26px!important;margin:0!important;padding:0!important}

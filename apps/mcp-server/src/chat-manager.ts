@@ -1,7 +1,11 @@
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { randomUUID } from "node:crypto";
 
-import { providerForModel, type AgentProvider } from "./agent-providers.js";
+import {
+  providerForModel,
+  resolveEffort,
+  type AgentProvider,
+} from "./agent-providers.js";
 
 export type ChatEvent = {
   readonly id: number;
@@ -39,6 +43,7 @@ export class ChatManager {
     model: string,
     port: number,
     token: string,
+    effort?: string,
   ): void {
     const session = this.#session(sessionId);
     if (session.process !== undefined)
@@ -59,6 +64,7 @@ export class ChatManager {
         ...prefix,
         ...provider.buildArguments({
           model,
+          effort: resolveEffort(provider, effort),
           port,
           resumeKey: session.resumeKey,
         }),

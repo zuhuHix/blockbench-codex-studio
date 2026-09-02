@@ -104,10 +104,12 @@ export function sendChatMessage(
   sessionId: string,
   prompt: string,
   model: string,
+  effort: string,
 ): Promise<unknown> {
   return requestJson(settings, `/bridge/chat/${sessionId}/messages`, "POST", {
     prompt,
     model,
+    effort,
   });
 }
 

@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 
-import { providerForModel, mcpServerName } from "./agent-providers.js";
+import {
+  providerForModel,
+  resolveEffort,
+  mcpServerName,
+} from "./agent-providers.js";
 
 describe("agent providers", () => {
   it("routes each supported model to its provider", () => {
@@ -14,6 +18,7 @@ describe("agent providers", () => {
   it("builds Claude arguments that isolate the bridge MCP server", () => {
     const args = providerForModel("claude-sonnet-5").buildArguments({
       model: "claude-sonnet-5",
+      effort: "high",
       port: 48172,
     });
     expect(args).toContain("--strict-mcp-config");
@@ -36,10 +41,35 @@ describe("agent providers", () => {
   it("resumes an existing Claude session by identifier", () => {
     const args = providerForModel("claude-opus-5").buildArguments({
       model: "claude-opus-5",
+      effort: "max",
       port: 48172,
       resumeKey: "session-abc",
     });
     expect(args[args.indexOf("--resume") + 1]).toBe("session-abc");
+    expect(args[args.indexOf("--effort") + 1]).toBe("max");
+  });
+
+  it("passes reasoning effort to Codex through its config override", () => {
+    const args = providerForModel("gpt-5.6-sol").buildArguments({
+      model: "gpt-5.6-sol",
+      effort: "xhigh",
+      port: 48172,
+    });
+    expect(args).toContain('model_reasoning_effort="xhigh"');
+  });
+
+  it("defaults to medium effort and rejects levels the CLI lacks", () => {
+    const claude = providerForModel("claude-opus-5");
+    const codex = providerForModel("gpt-5.6-sol");
+    expect(resolveEffort(claude)).toBe("medium");
+    expect(resolveEffort(claude, "max")).toBe("max");
+    // "max" is Claude-only; "minimal" is Codex-only.
+    expect(() => resolveEffort(codex, "max")).toThrow(
+      "Unsupported effort level for codex.",
+    );
+    expect(() => resolveEffort(claude, "minimal")).toThrow(
+      "Unsupported effort level for claude.",
+    );
   });
 
   it("reads assistant text and the session key from Claude stream events", () => {
