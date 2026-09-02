@@ -1,10 +1,47 @@
-import { publishSnapshot, type BridgeSettings } from "./bridge-client.js";
+import {
+  acknowledgeCommand,
+  fetchCommands,
+  publishSnapshot,
+  type BridgeSettings,
+} from "./bridge-client.js";
 import { captureSnapshot, captureViewport } from "./snapshot.js";
+import { applyCommand } from "./command-applier.js";
+import { createAssistantPanel } from "./assistant-panel.js";
 
 const tokenStorageKey = "blockbench_codex_studio_token";
 let publishTimer: ReturnType<typeof setInterval> | undefined;
 let configureAction: Action | undefined;
 let captureAction: Action | undefined;
+let applyingCommand = false;
+let assistantPanel: Panel | undefined;
+let assistantStyles: { delete(): void } | undefined;
+
+async function pollCommands(settings: BridgeSettings): Promise<void> {
+  if (applyingCommand) return;
+  applyingCommand = true;
+  try {
+    for (const command of await fetchCommands(settings)) {
+      try {
+        applyCommand(command);
+        await publish(true);
+        await acknowledgeCommand(settings, {
+          commandId: command.commandId,
+          success: true,
+        });
+        Blockbench.showQuickMessage(`Applied: ${command.label}`, 2000);
+      } catch (error) {
+        await acknowledgeCommand(settings, {
+          commandId: command.commandId,
+          success: false,
+          error: error instanceof Error ? error.message : "Command failed.",
+        });
+        throw error;
+      }
+    }
+  } finally {
+    applyingCommand = false;
+  }
+}
 
 function currentSettings(): BridgeSettings | undefined {
   const token = localStorage.getItem(tokenStorageKey);
@@ -24,10 +61,12 @@ async function publish(includeViewport = false): Promise<void> {
 function beginPublishing(): void {
   if (publishTimer !== undefined) clearInterval(publishTimer);
   void publish().catch(() => undefined);
-  publishTimer = setInterval(
-    () => void publish().catch(() => undefined),
-    1_000,
-  );
+  publishTimer = setInterval(() => {
+    void publish().catch(() => undefined);
+    const settings = currentSettings();
+    if (settings !== undefined)
+      void pollCommands(settings).catch(() => undefined);
+  }, 1_000);
 }
 
 function showConfiguration(): void {
@@ -65,10 +104,13 @@ Plugin.register("blockbench_codex_studio", {
   description:
     "Safe, typed Blockbench inspection and modeling through Codex MCP.",
   icon: "smart_toy",
-  version: "0.1.0",
+  version: "0.2.0",
   min_version: "5.0.0",
   variant: "desktop",
   onload() {
+    const assistant = createAssistantPanel(currentSettings, showConfiguration);
+    assistantPanel = assistant.panel;
+    assistantStyles = assistant.styles;
     configureAction = new Action("blockbench_codex_configure", {
       name: "Configure Codex Studio",
       description: "Set the local MCP bridge bearer token.",
@@ -89,16 +131,14 @@ Plugin.register("blockbench_codex_studio", {
           )
           .catch((error: unknown) =>
             Blockbench.showQuickMessage(
-              error instanceof Error
-                ? error.message
-                : "Viewport publication failed.",
-              3000,
+              error instanceof Error ? error.message : String(error),
+              6000,
             ),
           );
       },
     });
-    MenuBar.addAction(configureAction, "tools");
-    MenuBar.addAction(captureAction, "tools");
+    MenuBar.menus.tools.addAction(configureAction);
+    MenuBar.menus.tools.addAction(captureAction);
     if (currentSettings() === undefined) showConfiguration();
     else beginPublishing();
   },
@@ -106,5 +146,7 @@ Plugin.register("blockbench_codex_studio", {
     if (publishTimer !== undefined) clearInterval(publishTimer);
     configureAction?.delete();
     captureAction?.delete();
+    assistantPanel?.delete();
+    assistantStyles?.delete();
   },
 });

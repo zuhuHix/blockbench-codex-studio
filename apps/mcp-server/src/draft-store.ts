@@ -1,0 +1,191 @@
+import { randomUUID } from "node:crypto";
+import {
+  applyDraftCommandSchema,
+  draftSummarySchema,
+  type ApplyDraftCommand,
+  type BlockbenchSnapshot,
+  type Bounds3,
+  type DraftSummary,
+  type TransactionId,
+} from "@blockbench-codex/contracts";
+import { containsBounds, dimensions } from "@blockbench-codex/geometry";
+
+interface DraftRecord {
+  readonly projectId: string;
+  summary: DraftSummary;
+}
+
+function sameVector(a: readonly number[], b: readonly number[]): boolean {
+  return a.every((value, index) => value === b[index]);
+}
+
+function sameSize(a: Bounds3, b: Bounds3): boolean {
+  return a.min.every(
+    (_, axis) => a.max[axis]! - a.min[axis]! === b.max[axis]! - b.min[axis]!,
+  );
+}
+
+export class DraftStore {
+  readonly #drafts = new Map<string, DraftRecord>();
+  readonly #commands: ApplyDraftCommand[] = [];
+
+  begin(snapshot: BlockbenchSnapshot, label: string): DraftSummary {
+    const summary = draftSummarySchema.parse({
+      transactionId: randomUUID(),
+      label,
+      operations: [],
+      warningCount: 0,
+    });
+    this.#drafts.set(summary.transactionId, {
+      projectId: snapshot.project.id,
+      summary,
+    });
+    return summary;
+  }
+
+  get(transactionId: TransactionId): DraftSummary {
+    const draft = this.#drafts.get(transactionId);
+    if (draft === undefined)
+      throw new Error("Draft transaction was not found.");
+    return draft.summary;
+  }
+
+  validate(snapshot: BlockbenchSnapshot, transactionId: TransactionId) {
+    const draft = this.#drafts.get(transactionId);
+    if (draft === undefined)
+      throw new Error("Draft transaction was not found.");
+    const errors: string[] = [];
+    if (draft.projectId !== snapshot.project.id)
+      errors.push("The active Blockbench project changed during the draft.");
+    for (const operation of draft.summary.operations) {
+      const current = snapshot.elements.find(
+        (element) => element.id === operation.elementId,
+      );
+      if (current === undefined) {
+        errors.push(`Cube ${operation.elementId} no longer exists.`);
+        continue;
+      }
+      if (current.parentGroupId !== operation.expectedParentGroupId)
+        errors.push(`Cube ${operation.elementId} changed parent groups.`);
+      if (
+        !sameVector(current.bounds.min, operation.from.min) ||
+        !sameVector(current.bounds.max, operation.from.max)
+      )
+        errors.push(`Cube ${operation.elementId} changed after drafting.`);
+      if (!sameVector(dimensions(operation.from), dimensions(operation.to)))
+        errors.push(`Cube ${operation.elementId} would change dimensions.`);
+      if (
+        snapshot.project.bounds !== undefined &&
+        !containsBounds(snapshot.project.bounds, operation.to)
+      )
+        errors.push(`Cube ${operation.elementId} would leave project bounds.`);
+    }
+    return {
+      valid: errors.length === 0,
+      transactionId,
+      operationCount: draft.summary.operations.length,
+      errors,
+    };
+  }
+
+  move(
+    snapshot: BlockbenchSnapshot,
+    transactionId: TransactionId,
+    elementId: string,
+    to: Bounds3,
+  ): DraftSummary {
+    const draft = this.#drafts.get(transactionId);
+    if (draft === undefined)
+      throw new Error("Draft transaction was not found.");
+    if (draft.projectId !== snapshot.project.id)
+      throw new Error(
+        "The active Blockbench project changed during the draft.",
+      );
+    const element = snapshot.elements.find(
+      (candidate) => candidate.id === elementId,
+    );
+    if (element === undefined) throw new Error("Cube element was not found.");
+    if (element.parentGroupId === "root")
+      throw new Error(
+        "Root-level cubes cannot be moved by the safe draft tool.",
+      );
+    if (!sameSize(element.bounds, to))
+      throw new Error("move_cube must preserve all cube dimensions.");
+    if (
+      draft.summary.operations.some(
+        (operation) => operation.elementId === element.id,
+      )
+    )
+      throw new Error(
+        "This draft already contains an operation for that cube.",
+      );
+    draft.summary = draftSummarySchema.parse({
+      ...draft.summary,
+      operations: [
+        ...draft.summary.operations,
+        {
+          kind: "move_cube",
+          elementId: element.id,
+          from: element.bounds,
+          to,
+          preserveSize: true,
+          expectedParentGroupId: element.parentGroupId,
+        },
+      ],
+    });
+    return draft.summary;
+  }
+
+  commit(
+    snapshot: BlockbenchSnapshot,
+    transactionId: TransactionId,
+  ): ApplyDraftCommand {
+    const draft = this.#drafts.get(transactionId);
+    if (draft === undefined)
+      throw new Error("Draft transaction was not found.");
+    if (draft.summary.operations.length === 0)
+      throw new Error("Cannot commit an empty draft.");
+    const validation = this.validate(snapshot, transactionId);
+    if (!validation.valid) throw new Error(validation.errors.join(" "));
+    for (const operation of draft.summary.operations) {
+      const current = snapshot.elements.find(
+        (element) => element.id === operation.elementId,
+      );
+      if (
+        current === undefined ||
+        current.parentGroupId !== operation.expectedParentGroupId ||
+        !sameVector(current.bounds.min, operation.from.min) ||
+        !sameVector(current.bounds.max, operation.from.max)
+      )
+        throw new Error(
+          `Cube ${operation.elementId} changed after the draft began.`,
+        );
+    }
+    const command = applyDraftCommandSchema.parse({
+      commandId: randomUUID(),
+      projectId: draft.projectId,
+      transactionId,
+      label: draft.summary.label,
+      operations: draft.summary.operations,
+    });
+    this.#commands.push(command);
+    this.#drafts.delete(transactionId);
+    return command;
+  }
+
+  discard(transactionId: TransactionId): void {
+    if (!this.#drafts.delete(transactionId))
+      throw new Error("Draft transaction was not found.");
+  }
+
+  pending(): readonly ApplyDraftCommand[] {
+    return this.#commands;
+  }
+
+  acknowledge(commandId: string): void {
+    const index = this.#commands.findIndex(
+      (command) => command.commandId === commandId,
+    );
+    if (index >= 0) this.#commands.splice(index, 1);
+  }
+}

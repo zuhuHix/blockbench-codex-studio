@@ -14,4 +14,18 @@ describe("SnapshotStore", () => {
       stale: true,
     });
   });
+
+  it("retains the latest viewport until a newer capture is published", () => {
+    const store = new SnapshotStore();
+    const viewport = {
+      mimeType: "image/png" as const,
+      dataBase64: "image-data",
+      width: 768,
+      height: 768,
+      capturedAt: "2026-09-01T09:00:00.000Z",
+    };
+    store.set({ viewport } as BlockbenchSnapshot);
+    store.set({ capturedAt: "later" } as BlockbenchSnapshot);
+    expect(store.get()?.viewport).toEqual(viewport);
+  });
 });

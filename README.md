@@ -16,6 +16,8 @@ Read [BLOCKBENCH_CODEX_MCP_MASTER_BLUEPRINT.md](docs/BLOCKBENCH_CODEX_MCP_MASTER
 - Shared result, scene, and draft-operation contracts started
 - Geometry safety primitives and a disposable specimen-chamber fixture added
 - Authenticated read-only MCP bridge and installable development plugin added
+- First Phase 2 draft path added: stage size-preserving cube moves, validate live state, commit through the bridge, and apply as one Blockbench Undo entry
+- First Phase 3 semantic path added: infer the selected anchor, arrange same-group cubes into a physically overlapping chain, enforce project bounds, and publish a post-commit viewport capture
 - License and final product name intentionally undecided
 
 ## Development

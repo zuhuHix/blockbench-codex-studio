@@ -10,6 +10,7 @@ export default tseslint.config(
       "eslint.config.mjs",
       "vitest.config.ts",
       "apps/blockbench-plugin/build.mjs",
+      "scripts/*.mjs",
     ],
   },
   eslint.configs.recommended,
