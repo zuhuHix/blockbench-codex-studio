@@ -28,30 +28,36 @@ function serializeOutline(node: BlockbenchNode): OutlineSnapshotNode {
 
 const faceNames = ["north", "south", "east", "west", "up", "down"] as const;
 
+export function serializeFace(
+  face:
+    | {
+        readonly uv?: readonly number[];
+        readonly texture?: string | number | false | null;
+        readonly rotation?: number;
+        readonly enabled?: boolean;
+      }
+    | undefined,
+) {
+  const hasTexture =
+    face?.texture !== false &&
+    face?.texture !== null &&
+    face?.texture !== undefined;
+  const uv = face?.uv;
+  return {
+    textureId: hasTexture ? String(face.texture) : null,
+    uv: uv?.length === 4 ? [...uv] : [0, 0, 0, 0],
+    rotation:
+      face?.rotation === 90 || face?.rotation === 180 || face?.rotation === 270
+        ? face.rotation
+        : 0,
+    enabled: hasTexture && (face.enabled ?? true),
+  };
+}
+
 function serializeFaces(cube: BlockbenchNode) {
   if (cube.faces === undefined) return undefined;
   return Object.fromEntries(
-    faceNames.map((name) => {
-      const face = cube.faces?.[name];
-      const uv = face?.uv;
-      return [
-        name,
-        {
-          textureId:
-            face?.texture === null || face?.texture === undefined
-              ? null
-              : String(face.texture),
-          uv: uv?.length === 4 ? [...uv] : [0, 0, 0, 0],
-          rotation:
-            face?.rotation === 90 ||
-            face?.rotation === 180 ||
-            face?.rotation === 270
-              ? face.rotation
-              : 0,
-          enabled: face?.enabled ?? face?.texture !== null,
-        },
-      ];
-    }),
+    faceNames.map((name) => [name, serializeFace(cube.faces?.[name])]),
   );
 }
 

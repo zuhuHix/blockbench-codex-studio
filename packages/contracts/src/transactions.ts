@@ -48,6 +48,24 @@ export const applyDraftCommandSchema = z.object({
   operations: z.array(draftOperationSchema).min(1),
 });
 
+export const setSelectionCommandSchema = z.object({
+  commandId: z.string().uuid(),
+  projectId: z.string().min(1),
+  elementIds: z.array(elementIdSchema).min(1),
+});
+
+export const undoCommandSchema = z.object({
+  commandId: z.string().uuid(),
+  projectId: z.string().min(1),
+  action: z.literal("undo"),
+});
+
+export const bridgeCommandSchema = z.union([
+  applyDraftCommandSchema,
+  setSelectionCommandSchema,
+  undoCommandSchema,
+]);
+
 export const commandAcknowledgementSchema = z.object({
   commandId: z.string().uuid(),
   success: z.boolean(),
@@ -60,6 +78,9 @@ export type MoveCubeOperation = z.infer<typeof moveCubeOperationSchema>;
 export type SetFaceUvOperation = z.infer<typeof setFaceUvOperationSchema>;
 export type TransactionId = z.infer<typeof transactionIdSchema>;
 export type ApplyDraftCommand = z.infer<typeof applyDraftCommandSchema>;
+export type SetSelectionCommand = z.infer<typeof setSelectionCommandSchema>;
+export type UndoCommand = z.infer<typeof undoCommandSchema>;
+export type BridgeCommand = z.infer<typeof bridgeCommandSchema>;
 export type CommandAcknowledgement = z.infer<
   typeof commandAcknowledgementSchema
 >;

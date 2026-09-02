@@ -1,10 +1,67 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { applyDraftCommandSchema } from "@blockbench-codex/contracts";
+import {
+  applyDraftCommandSchema,
+  setSelectionCommandSchema,
+  undoCommandSchema,
+} from "@blockbench-codex/contracts";
 
 import { applyCommand } from "./command-applier.js";
 
 describe("Blockbench command application", () => {
   afterEach(() => vi.unstubAllGlobals());
+
+  it("replaces the current selection with authoritative cube IDs", () => {
+    const oldSelection = { uuid: "old" };
+    const selected: unknown[] = [oldSelection];
+    const cubes = [
+      {
+        uuid: "cube-a",
+        markAsSelected: vi.fn(function (this: unknown) {
+          selected.push(this);
+        }),
+      },
+      {
+        uuid: "cube-b",
+        markAsSelected: vi.fn(function (this: unknown) {
+          selected.push(this);
+        }),
+      },
+    ];
+    const updateSelection = vi.fn();
+    vi.stubGlobal("Project", { uuid: "project" });
+    vi.stubGlobal("Cube", { all: cubes });
+    vi.stubGlobal("Outliner", { selected });
+    vi.stubGlobal("updateSelection", updateSelection);
+
+    applyCommand(
+      setSelectionCommandSchema.parse({
+        commandId: "10000000-0000-4000-8000-000000000000",
+        projectId: "project",
+        elementIds: ["cube-a", "cube-b"],
+      }),
+    );
+
+    expect(cubes[0]!.markAsSelected).toHaveBeenCalledOnce();
+    expect(cubes[1]!.markAsSelected).toHaveBeenCalledOnce();
+    expect(selected).toEqual(cubes);
+    expect(updateSelection).toHaveBeenCalledOnce();
+  });
+
+  it("routes undo through Blockbench's native Undo stack", () => {
+    const undo = vi.fn();
+    vi.stubGlobal("Project", { uuid: "project" });
+    vi.stubGlobal("Undo", { undo });
+
+    applyCommand(
+      undoCommandSchema.parse({
+        commandId: "10000000-0000-4000-8000-000000000000",
+        projectId: "project",
+        action: "undo",
+      }),
+    );
+
+    expect(undo).toHaveBeenCalledOnce();
+  });
 
   it("applies a multi-cube draft as one named Undo edit and refreshes geometry", () => {
     const group = { uuid: "group", name: "culture_stage_2" };

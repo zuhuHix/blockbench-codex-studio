@@ -1,7 +1,7 @@
 import type * as Net from "node:net";
 import type { captureSnapshot } from "./snapshot.js";
 import type {
-  ApplyDraftCommand,
+  BridgeCommand,
   CommandAcknowledgement,
 } from "@blockbench-codex/contracts";
 
@@ -133,8 +133,8 @@ export function stopChat(
 
 export async function fetchCommands(
   settings: BridgeSettings,
-): Promise<readonly ApplyDraftCommand[]> {
-  const result = await requestJson<{ commands: ApplyDraftCommand[] }>(
+): Promise<readonly BridgeCommand[]> {
+  const result = await requestJson<{ commands: BridgeCommand[] }>(
     settings,
     "/bridge/commands",
     "GET",
