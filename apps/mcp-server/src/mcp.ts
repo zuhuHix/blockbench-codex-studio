@@ -121,6 +121,21 @@ export function createMcpServer(
   );
 
   server.registerTool(
+    "set_selection",
+    {
+      description:
+        "Select a non-empty set of Blockbench elements by authoritative ID.",
+      annotations: draftAnnotations,
+      inputSchema: { elementIds: z.array(z.string().min(1)).min(1) },
+    },
+    ({ elementIds }) =>
+      jsonContent({
+        queued: true,
+        command: drafts.select(requireSnapshot(store), elementIds),
+      }),
+  );
+
+  server.registerTool(
     "list_outline",
     {
       description:
@@ -240,6 +255,19 @@ export function createMcpServer(
       drafts.discard(transactionId);
       return jsonContent({ discarded: true, transactionId });
     },
+  );
+
+  server.registerTool(
+    "undo",
+    {
+      description: "Undo the most recent Blockbench edit as one native step.",
+      annotations: draftAnnotations,
+    },
+    () =>
+      jsonContent({
+        queued: true,
+        command: drafts.undo(requireSnapshot(store)),
+      }),
   );
 
   server.registerTool(

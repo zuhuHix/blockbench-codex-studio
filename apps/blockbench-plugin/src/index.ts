@@ -95,7 +95,10 @@ async function pollCommands(settings: BridgeSettings): Promise<void> {
           commandId: command.commandId,
           success: true,
         });
-        Blockbench.showQuickMessage(`Applied: ${command.label}`, 2000);
+        Blockbench.showQuickMessage(
+          `Applied: ${"label" in command ? command.label : "Selection updated"}`,
+          2000,
+        );
       } catch (error) {
         await acknowledgeCommand(settings, {
           commandId: command.commandId,

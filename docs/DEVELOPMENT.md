@@ -68,7 +68,7 @@ With the connected anchor and target cubes selected:
 
 `set_face_uv` provides a direct typed mapping tool. `pack_uv_islands` produces deterministic non-overlapping rows within the published project texture dimensions, preserving island size and flipped direction. `normalize_texel_density` stages a requested pixels-per-model-unit scale for all enabled selected faces. Root-level cubes, missing six-face snapshots, stale face mappings, invalid atlas sizes, and islands that cannot fit are rejected.
 
-The algorithms and MCP/Undo path are covered by the automated gate. Phase 4's visual exit criterion still requires a live textured fixture acceptance showing substantially increased coverage without visible discontinuities.
+The algorithms and MCP/Undo path are covered by the automated gate. The textured fixture has also passed live acceptance in Blockbench with increased coverage and no visible or audited discontinuities.
 
 ## Live acceptance evidence
 
@@ -82,7 +82,18 @@ The specimen fixture was accepted against Blockbench 5.1.6 on 2026-09-01:
 - The result viewport was captured through MCP.
 - One Ctrl+Z restored both target bounds exactly and returned connectivity to three components with zero edges.
 
+The textured Phase 4 fixture was accepted against Blockbench 5.1.6 on 2026-09-02:
+
+- The typed bridge selected all three connected fixture cubes without manual UI setup.
+- Continuous projection validated as one draft containing 12 target-face operations.
+- The seam audit improved from 12 discontinuities to zero.
+- Unique atlas coverage increased from 37.5% to 42.72%, a 13.9% relative increase.
+- Before, after, and restored viewports were captured and visually inspected.
+- One native Undo restored all 18 original face mappings exactly.
+
 For repeatable diagnostics, `scripts/live-acceptance.mjs` supports `inspect`, `stage`, `commit <transaction-id>`, and `viewport <output.png>` actions when `BLOCKBENCH_CODEX_TOKEN` is set.
+
+For the complete Phase 4 acceptance, launch `specimen-uv-chain.bbmodel` and run `node scripts/live-acceptance.mjs phase4 [output-prefix]`. The script selects the three fixture cubes through the typed bridge, records coverage and seam audits, commits continuous projection, saves before/after/restored viewports, and verifies that one native Undo restores every original face mapping exactly.
 
 Codex registration is explicit and uses the supported Streamable HTTP flags:
 

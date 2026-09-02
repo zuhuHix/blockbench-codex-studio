@@ -146,6 +146,7 @@ describe("studio HTTP app", () => {
         "health",
         "get_project_summary",
         "get_selection",
+        "set_selection",
         "list_outline",
         "capture_viewport",
         "begin_draft",
@@ -154,6 +155,7 @@ describe("studio HTTP app", () => {
         "validate_draft",
         "commit_draft",
         "discard_draft",
+        "undo",
         "connect_selected_chain",
         "inspect_connectivity",
         "get_cube_face_uvs",
@@ -179,6 +181,17 @@ describe("studio HTTP app", () => {
       expect(JSON.stringify(result)).toContain(
         '\\"name\\": \\"Specimen Chamber\\"',
       );
+
+      const selection = await client.callTool({
+        name: "set_selection",
+        arguments: {
+          elementIds: [
+            "11111111-1111-4111-8111-111111111111",
+            "22222222-2222-4222-8222-222222222222",
+          ],
+        },
+      });
+      expect(JSON.stringify(selection)).toContain('\\"elementIds\\": [');
 
       const begun = await client.callTool({
         name: "begin_draft",
@@ -207,6 +220,9 @@ describe("studio HTTP app", () => {
         .set(authorization)
         .expect(200);
       expect(queued.text).toContain('"projectId":"specimen"');
+      expect(queued.text).toContain(
+        '"elementIds":["11111111-1111-4111-8111-111111111111","22222222-2222-4222-8222-222222222222"]',
+      );
       expect(queued.text).toContain('"label":"Move main blob safely"');
       expect(queued.text).toContain('"from":{"min":[6,1,6],"max":[10,4,10]}');
       expect(queued.text).toContain('"to":{"min":[7,1,6],"max":[11,4,10]}');

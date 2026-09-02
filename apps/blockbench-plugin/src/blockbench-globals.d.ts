@@ -8,11 +8,13 @@ interface BlockbenchNode {
   to?: number[];
   readonly rotation?: readonly [number, number, number];
   readonly visibility?: boolean;
+  markAsSelected?(selectChildren?: boolean): BlockbenchNode;
+  unselect?(unselectParent?: boolean): BlockbenchNode;
   readonly faces?: Record<
     string,
     {
       uv?: number[];
-      texture?: string | number | null;
+      texture?: string | number | false | null;
       rotation?: number;
       enabled?: boolean;
     }
@@ -94,8 +96,9 @@ declare const Canvas: {
 };
 declare const Outliner: {
   readonly root: readonly BlockbenchNode[];
-  readonly selected: readonly BlockbenchNode[];
+  readonly selected: BlockbenchNode[];
 };
+declare function updateSelection(): void;
 declare const Preview: {
   readonly selected?: {
     screenshot(

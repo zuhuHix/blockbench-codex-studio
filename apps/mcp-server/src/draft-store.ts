@@ -1,6 +1,9 @@
 import { randomUUID } from "node:crypto";
 import {
   applyDraftCommandSchema,
+  setSelectionCommandSchema,
+  undoCommandSchema,
+  type BridgeCommand,
   draftSummarySchema,
   type ApplyDraftCommand,
   type BlockbenchSnapshot,
@@ -29,7 +32,7 @@ function sameSize(a: Bounds3, b: Bounds3): boolean {
 
 export class DraftStore {
   readonly #drafts = new Map<string, DraftRecord>();
-  readonly #commands: ApplyDraftCommand[] = [];
+  readonly #commands: BridgeCommand[] = [];
 
   begin(snapshot: BlockbenchSnapshot, label: string): DraftSummary {
     const summary = draftSummarySchema.parse({
@@ -243,12 +246,42 @@ export class DraftStore {
     return command;
   }
 
+  select(
+    snapshot: BlockbenchSnapshot,
+    elementIds: readonly string[],
+  ): BridgeCommand {
+    const uniqueIds = [...new Set(elementIds)];
+    const availableIds = new Set<string>(snapshot.elements.map(({ id }) => id));
+    const missing = uniqueIds.filter((id) => !availableIds.has(id));
+    if (missing.length > 0)
+      throw new Error(
+        `Selection contains unknown elements: ${missing.join(", ")}.`,
+      );
+    const command = setSelectionCommandSchema.parse({
+      commandId: randomUUID(),
+      projectId: snapshot.project.id,
+      elementIds: uniqueIds,
+    });
+    this.#commands.push(command);
+    return command;
+  }
+
+  undo(snapshot: BlockbenchSnapshot): BridgeCommand {
+    const command = undoCommandSchema.parse({
+      commandId: randomUUID(),
+      projectId: snapshot.project.id,
+      action: "undo",
+    });
+    this.#commands.push(command);
+    return command;
+  }
+
   discard(transactionId: TransactionId): void {
     if (!this.#drafts.delete(transactionId))
       throw new Error("Draft transaction was not found.");
   }
 
-  pending(): readonly ApplyDraftCommand[] {
+  pending(): readonly BridgeCommand[] {
     return this.#commands;
   }
 

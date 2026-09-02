@@ -1,8 +1,25 @@
-import type { ApplyDraftCommand } from "@blockbench-codex/contracts";
+import type { BridgeCommand } from "@blockbench-codex/contracts";
+import { serializeFace } from "./snapshot.js";
 
-export function applyCommand(command: ApplyDraftCommand): void {
+export function applyCommand(command: BridgeCommand): void {
   if ((Project?.uuid ?? Project?.name) !== command.projectId)
     throw new Error("Command targets a different Blockbench project.");
+  if ("action" in command) {
+    Undo.undo();
+    return;
+  }
+  if ("elementIds" in command) {
+    const selected = command.elementIds.map((elementId) => {
+      const cube = Cube.all.find((candidate) => candidate.uuid === elementId);
+      if (cube?.markAsSelected === undefined)
+        throw new Error(`Cube ${elementId} is unavailable.`);
+      return cube;
+    });
+    Outliner.selected.splice(0, Outliner.selected.length);
+    for (const element of selected) element.markAsSelected?.();
+    updateSelection();
+    return;
+  }
   const cubes = command.operations.map((operation) => {
     const cube = Cube.all.find(
       (candidate) => candidate.uuid === operation.elementId,
@@ -21,18 +38,7 @@ export function applyCommand(command: ApplyDraftCommand): void {
         : JSON.stringify(
             cube.faces?.[operation.face] === undefined
               ? undefined
-              : {
-                  textureId:
-                    cube.faces[operation.face]!.texture === null ||
-                    cube.faces[operation.face]!.texture === undefined
-                      ? null
-                      : String(cube.faces[operation.face]!.texture),
-                  uv: cube.faces[operation.face]!.uv,
-                  rotation: cube.faces[operation.face]!.rotation ?? 0,
-                  enabled:
-                    cube.faces[operation.face]!.enabled ??
-                    cube.faces[operation.face]!.texture !== null,
-                },
+              : serializeFace(cube.faces[operation.face]),
           ) !== JSON.stringify(operation.from))
     )
       throw new Error(

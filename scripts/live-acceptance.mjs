@@ -24,7 +24,36 @@ function textResult(result) {
 }
 
 async function call(name, args = {}) {
-  return textResult(await client.callTool({ name, arguments: args }));
+  const result = await client.callTool({ name, arguments: args });
+  if (result.isError)
+    throw new Error(
+      result.content?.find((item) => item.type === "text")?.text ??
+        `${name} failed.`,
+    );
+  return textResult(result);
+}
+
+const delay = (milliseconds) =>
+  new Promise((resolve) => setTimeout(resolve, milliseconds));
+
+async function waitFor(description, read, accept) {
+  for (let attempt = 0; attempt < 20; attempt += 1) {
+    const value = await read();
+    if (accept(value)) return value;
+    await delay(250);
+  }
+  throw new Error(`Timed out waiting for ${description}.`);
+}
+
+async function saveViewport(output) {
+  const result = await client.callTool({
+    name: "capture_viewport",
+    arguments: {},
+  });
+  const image = result.content?.find((item) => item.type === "image");
+  if (!image || image.type !== "image")
+    throw new Error("No viewport image was returned.");
+  await writeFile(output, Buffer.from(image.data, "base64"));
 }
 
 try {
@@ -92,16 +121,89 @@ try {
       ),
     );
   } else if (action === "viewport") {
-    const result = await client.callTool({
-      name: "capture_viewport",
-      arguments: {},
-    });
-    const image = result.content?.find((item) => item.type === "image");
-    if (!image || image.type !== "image")
-      throw new Error("No viewport image was returned.");
     const output = argument ?? "blockbench-live-viewport.png";
-    await writeFile(output, Buffer.from(image.data, "base64"));
+    await saveViewport(output);
     console.log(output);
+  } else if (action === "phase4") {
+    const elementIds = [
+      "11111111-1111-4111-8111-111111111111",
+      "22222222-2222-4222-8222-222222222222",
+      "33333333-3333-4333-8333-333333333333",
+    ];
+    const outputPrefix = argument ?? "phase4-live";
+    await call("set_selection", { elementIds });
+    await waitFor(
+      "the Phase 4 fixture selection",
+      () => call("get_selection"),
+      (selection) =>
+        JSON.stringify(selection.ids) === JSON.stringify(elementIds),
+    );
+    const beforeFaces = await Promise.all(
+      elementIds.map((elementId) => call("get_cube_face_uvs", { elementId })),
+    );
+    const before = {
+      coverage: await call("measure_uv_coverage"),
+      seams: await call("audit_uv_seams"),
+    };
+    await saveViewport(`${outputPrefix}-before.png`);
+
+    const staged = await call("project_connected_uv", {
+      label: "Phase 4 continuous UV acceptance",
+    });
+    const validation = await call("validate_draft", {
+      transactionId: staged.draft.transactionId,
+    });
+    if (!validation.valid) throw new Error(JSON.stringify(validation));
+    await call("commit_draft", {
+      transactionId: staged.draft.transactionId,
+    });
+    const after = await waitFor(
+      "the projected UV commit",
+      async () => ({
+        coverage: await call("measure_uv_coverage"),
+        seams: await call("audit_uv_seams"),
+      }),
+      (result) => result.seams.continuous,
+    );
+    await saveViewport(`${outputPrefix}-after.png`);
+
+    await call("undo");
+    const restoredFaces = await waitFor(
+      "the one-step UV undo",
+      () =>
+        Promise.all(
+          elementIds.map((elementId) =>
+            call("get_cube_face_uvs", { elementId }),
+          ),
+        ),
+      (faces) => JSON.stringify(faces) === JSON.stringify(beforeFaces),
+    );
+    const restored = {
+      coverage: await call("measure_uv_coverage"),
+      seams: await call("audit_uv_seams"),
+    };
+    await saveViewport(`${outputPrefix}-restored.png`);
+    console.log(
+      JSON.stringify(
+        {
+          before,
+          validation,
+          after,
+          coverageIncrease:
+            after.coverage.coveragePercent - before.coverage.coveragePercent,
+          undoRestoredExactly:
+            JSON.stringify(restoredFaces) === JSON.stringify(beforeFaces),
+          restored,
+          viewports: [
+            `${outputPrefix}-before.png`,
+            `${outputPrefix}-after.png`,
+            `${outputPrefix}-restored.png`,
+          ],
+        },
+        null,
+        2,
+      ),
+    );
   } else {
     throw new Error(`Unknown action: ${action}`);
   }
