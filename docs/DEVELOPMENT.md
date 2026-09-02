@@ -18,6 +18,8 @@ npm run build
 npm run check
 ```
 
+Use `npm ci` instead of `npm install` when verifying a clean checkout against the committed lockfile. `npm run check` is the release gate and must pass formatting, lint, tests, and a complete workspace build.
+
 ## Phase 1 development bridge
 
 For the complete Windows development startup, run:
@@ -26,7 +28,7 @@ For the complete Windows development startup, run:
 .\scripts\Start-Development.ps1 -ProjectPath .\packages\test-fixtures\models\specimen-loose-chain.bbmodel
 ```
 
-This builds the workspace, creates or reuses a user-local development token under `%LOCALAPPDATA%\BlockbenchCodexStudio`, starts the MCP server hidden, and launches Blockbench. Side-load the generated plugin once through **File > Plugins > Load Plugin from File**, allow its `net` permission, and enter the printed token through **Tools > Configure Codex Studio**. Blockbench remembers the file plugin and token, while later launcher runs reuse the same server token. Nothing is written into the repository or Blockbench project.
+This builds the workspace, creates or reuses a user-local development token under `%LOCALAPPDATA%\BlockbenchCodexStudio`, starts the MCP server hidden, and launches Blockbench. Side-load the generated plugin once through **File > Plugins > Load Plugin from File**, allow its `net`, `child_process`, and `process` permissions, and enter the printed token through **Tools > Configure Codex Studio**. Blockbench remembers the file plugin, permissions, and token. On later Blockbench launches, the plugin probes the saved local bridge, starts the companion hidden when necessary, and reconnects automatically. Nothing is written into the repository or Blockbench project.
 
 Manual startup remains available:
 

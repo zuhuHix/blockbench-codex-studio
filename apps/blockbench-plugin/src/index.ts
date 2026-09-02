@@ -2,8 +2,11 @@ import {
   acknowledgeCommand,
   fetchCommands,
   publishSnapshot,
+  requestJson,
   type BridgeSettings,
 } from "./bridge-client.js";
+import type * as ChildProcess from "node:child_process";
+import type * as NodeProcess from "node:process";
 import { captureSnapshot, captureViewport } from "./snapshot.js";
 import { applyCommand } from "./command-applier.js";
 import { createAssistantPanel } from "./assistant-panel.js";
@@ -15,6 +18,65 @@ let captureAction: Action | undefined;
 let applyingCommand = false;
 let assistantPanel: Panel | undefined;
 let assistantStyles: { delete(): void } | undefined;
+let companionStart: Promise<void> | undefined;
+
+function delay(milliseconds: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, milliseconds));
+}
+
+async function ensureCompanion(settings: BridgeSettings): Promise<void> {
+  try {
+    await requestJson(settings, "/health", "GET");
+    return;
+  } catch {
+    // The saved local bridge is absent; start the companion below.
+  }
+  const childProcess = requireNativeModule("child_process", {
+    message:
+      "Start the local Blockbench Codex Studio companion without opening a terminal window.",
+    optional: false,
+  }) as typeof ChildProcess | undefined;
+  if (childProcess === undefined)
+    throw new Error("Blockbench process permission was not granted.");
+  const nodeProcess = requireNativeModule("process", {
+    message:
+      "Pass the saved local bridge token only to the Codex Studio companion process.",
+    optional: false,
+  }) as typeof NodeProcess | undefined;
+  if (nodeProcess === undefined)
+    throw new Error(
+      "Blockbench process-environment permission was not granted.",
+    );
+  const companion = childProcess.spawn("node", [__STUDIO_SERVER_SCRIPT__], {
+    detached: true,
+    windowsHide: true,
+    stdio: "ignore",
+    env: {
+      ...nodeProcess.env,
+      BLOCKBENCH_CODEX_TOKEN: settings.token,
+      BLOCKBENCH_CODEX_PORT: String(settings.port),
+    },
+  });
+  companion.once("error", () => undefined);
+  companion.unref();
+  for (let attempt = 0; attempt < 20; attempt += 1) {
+    await delay(250);
+    try {
+      await requestJson(settings, "/health", "GET");
+      return;
+    } catch {
+      // Allow the TypeScript companion a bounded startup window.
+    }
+  }
+  throw new Error("The local Codex Studio companion did not start.");
+}
+
+function connectCompanion(settings: BridgeSettings): Promise<void> {
+  companionStart ??= ensureCompanion(settings).finally(() => {
+    companionStart = undefined;
+  });
+  return companionStart;
+}
 
 async function pollCommands(settings: BridgeSettings): Promise<void> {
   if (applyingCommand) return;
@@ -60,12 +122,27 @@ async function publish(includeViewport = false): Promise<void> {
 
 function beginPublishing(): void {
   if (publishTimer !== undefined) clearInterval(publishTimer);
-  void publish().catch(() => undefined);
+  const settings = currentSettings();
+  if (settings !== undefined) {
+    void connectCompanion(settings)
+      .then(() => publish())
+      .catch((error: unknown) =>
+        Blockbench.showQuickMessage(
+          error instanceof Error ? error.message : String(error),
+          5000,
+        ),
+      );
+  }
   publishTimer = setInterval(() => {
-    void publish().catch(() => undefined);
     const settings = currentSettings();
-    if (settings !== undefined)
+    if (settings !== undefined) {
+      void publish().catch(() =>
+        connectCompanion(settings)
+          .then(() => publish())
+          .catch(() => undefined),
+      );
       void pollCommands(settings).catch(() => undefined);
+    }
   }, 1_000);
 }
 

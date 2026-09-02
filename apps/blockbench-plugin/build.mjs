@@ -1,4 +1,5 @@
 import { build } from "esbuild";
+import { resolve } from "node:path";
 
 await build({
   entryPoints: ["src/index.ts"],
@@ -8,5 +9,10 @@ await build({
   platform: "browser",
   target: "chrome120",
   sourcemap: true,
+  define: {
+    __STUDIO_SERVER_SCRIPT__: JSON.stringify(
+      resolve("../mcp-server/dist/cli.js"),
+    ),
+  },
   banner: { js: "// Blockbench Codex Studio - generated development plugin" },
 });

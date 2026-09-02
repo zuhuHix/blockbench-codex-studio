@@ -92,6 +92,7 @@ declare const localStorage: {
   getItem(key: string): string | null;
   setItem(key: string, value: string): void;
 };
+declare const __STUDIO_SERVER_SCRIPT__: string;
 declare function requireNativeModule(
   moduleName: string,
   options?: {
