@@ -38,6 +38,9 @@ export const blockbenchSnapshotSchema = z.object({
     name: z.string().min(1),
     formatId: z.string().min(1),
     bounds: bounds3Schema.optional(),
+    textureSize: z
+      .object({ width: z.number().positive(), height: z.number().positive() })
+      .optional(),
   }),
   selection: z.array(elementIdSchema),
   outline: z.array(outlineNodeSchema),

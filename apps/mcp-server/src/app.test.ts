@@ -8,10 +8,29 @@ import { createStudioApp, startStudioServer } from "./app.js";
 
 const token = "test-token-that-is-at-least-32-characters-long";
 const authorization = { Authorization: `Bearer ${token}` };
+const mappedFace = {
+  textureId: "culture",
+  uv: [0, 0, 4, 4],
+  rotation: 0,
+  enabled: true,
+} as const;
+const mappedFaces = {
+  north: mappedFace,
+  south: mappedFace,
+  east: mappedFace,
+  west: mappedFace,
+  up: mappedFace,
+  down: mappedFace,
+};
 
 const snapshot = blockbenchSnapshotSchema.parse({
   bridgeVersion: 1,
-  project: { id: "specimen", name: "Specimen Chamber", formatId: "free" },
+  project: {
+    id: "specimen",
+    name: "Specimen Chamber",
+    formatId: "free",
+    textureSize: { width: 32, height: 32 },
+  },
   selection: [
     "11111111-1111-4111-8111-111111111111",
     "22222222-2222-4222-8222-222222222222",
@@ -33,6 +52,7 @@ const snapshot = blockbenchSnapshotSchema.parse({
       bounds: { min: [6, 1, 6], max: [10, 4, 10] },
       rotation: [0, 0, 0],
       visible: true,
+      faces: mappedFaces,
     },
     {
       id: "22222222-2222-4222-8222-222222222222",
@@ -41,6 +61,7 @@ const snapshot = blockbenchSnapshotSchema.parse({
       bounds: { min: [2, 2, 7], max: [4, 3, 8] },
       rotation: [0, 0, 0],
       visible: true,
+      faces: mappedFaces,
     },
     {
       id: "33333333-3333-4333-8333-333333333333",
@@ -49,6 +70,7 @@ const snapshot = blockbenchSnapshotSchema.parse({
       bounds: { min: [-1, 2, 7], max: [1, 3, 8] },
       rotation: [0, 0, 0],
       visible: true,
+      faces: mappedFaces,
     },
   ],
   capturedAt: "2026-09-01T09:00:00.000Z",
@@ -134,6 +156,13 @@ describe("studio HTTP app", () => {
         "discard_draft",
         "connect_selected_chain",
         "inspect_connectivity",
+        "get_cube_face_uvs",
+        "set_face_uv",
+        "project_connected_uv",
+        "measure_uv_coverage",
+        "audit_uv_seams",
+        "pack_uv_islands",
+        "normalize_texel_density",
       ]);
       expect(
         tools.tools.find((tool) => tool.name === "get_selection")?.annotations,
@@ -189,6 +218,20 @@ describe("studio HTTP app", () => {
       const semanticText = JSON.stringify(semantic);
       expect(semanticText).toContain("11111111-1111-4111-8111-111111111111");
       expect(semanticText).toContain('\\"connectedEdgeCount\\": 2');
+
+      const coverage = await client.callTool({
+        name: "measure_uv_coverage",
+        arguments: {},
+      });
+      expect(JSON.stringify(coverage)).toContain('\\"mappedFaceCount\\": 18');
+      const projected = await client.callTool({
+        name: "project_connected_uv",
+        arguments: { label: "Continue blob UVs" },
+      });
+      expect(JSON.stringify(projected)).toContain(
+        '\\"kind\\": \\"set_face_uv\\"',
+      );
+      expect(JSON.stringify(projected)).toContain('\\"operations\\": [');
     } finally {
       await client.close();
       await running.close();

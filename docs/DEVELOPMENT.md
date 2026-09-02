@@ -55,6 +55,21 @@ With one main blob and at least one loose cube selected in the same Outliner gro
 
 The semantic operation rejects root-level targets, mixed-group selections, stale geometry, dimension changes, and layouts outside known project bounds.
 
+## Phase 4 UV workflow
+
+With the connected anchor and target cubes selected:
+
+1. Call `get_cube_face_uvs` for any cube to inspect its explicit north, south, east, west, up, and down mappings.
+2. Call `measure_uv_coverage` for the selected set. Coverage is the unique clipped atlas area, so overlapping islands are not counted repeatedly.
+3. Call `audit_uv_seams` to compare current target mappings with deterministic world-space projection from the inferred anchor.
+4. Call `project_connected_uv` to create a draft containing all six target-face mappings. The projection preserves the anchor texture, face rotation, UV direction (including flipped axes), and texels per model unit.
+5. Inspect and validate the draft, then call `commit_draft`. The plugin applies every face mapping as one named Blockbench Undo entry and refreshes geometry and UV views.
+6. Measure coverage and audit seams again, inspect the viewport, and verify that one Ctrl+Z restores the original mappings.
+
+`set_face_uv` provides a direct typed mapping tool. `pack_uv_islands` produces deterministic non-overlapping rows within the published project texture dimensions, preserving island size and flipped direction. `normalize_texel_density` stages a requested pixels-per-model-unit scale for all enabled selected faces. Root-level cubes, missing six-face snapshots, stale face mappings, invalid atlas sizes, and islands that cannot fit are rejected.
+
+The algorithms and MCP/Undo path are covered by the automated gate. Phase 4's visual exit criterion still requires a live textured fixture acceptance showing substantially increased coverage without visible discontinuities.
+
 ## Live acceptance evidence
 
 The specimen fixture was accepted against Blockbench 5.1.6 on 2026-09-01:

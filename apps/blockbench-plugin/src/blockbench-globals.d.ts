@@ -8,6 +8,15 @@ interface BlockbenchNode {
   to?: number[];
   readonly rotation?: readonly [number, number, number];
   readonly visibility?: boolean;
+  readonly faces?: Record<
+    string,
+    {
+      uv?: number[];
+      texture?: string | number | null;
+      rotation?: number;
+      enabled?: boolean;
+    }
+  >;
 }
 
 declare class Action {
@@ -55,6 +64,8 @@ declare const Project:
       readonly uuid?: string;
       readonly name?: string;
       readonly format?: { readonly id?: string };
+      readonly texture_width?: number;
+      readonly texture_height?: number;
     }
   | undefined;
 declare const Cube: {
@@ -73,7 +84,12 @@ declare const Undo: {
 declare const Canvas: {
   updateView(options: {
     elements: readonly BlockbenchNode[];
-    element_aspects: { geometry: boolean; transform: boolean };
+    element_aspects: {
+      geometry?: boolean;
+      transform?: boolean;
+      uv?: boolean;
+      faces?: boolean;
+    };
   }): void;
 };
 declare const Outliner: {

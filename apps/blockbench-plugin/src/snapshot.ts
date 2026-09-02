@@ -26,6 +26,35 @@ function serializeOutline(node: BlockbenchNode): OutlineSnapshotNode {
   };
 }
 
+const faceNames = ["north", "south", "east", "west", "up", "down"] as const;
+
+function serializeFaces(cube: BlockbenchNode) {
+  if (cube.faces === undefined) return undefined;
+  return Object.fromEntries(
+    faceNames.map((name) => {
+      const face = cube.faces?.[name];
+      const uv = face?.uv;
+      return [
+        name,
+        {
+          textureId:
+            face?.texture === null || face?.texture === undefined
+              ? null
+              : String(face.texture),
+          uv: uv?.length === 4 ? [...uv] : [0, 0, 0, 0],
+          rotation:
+            face?.rotation === 90 ||
+            face?.rotation === 180 ||
+            face?.rotation === 270
+              ? face.rotation
+              : 0,
+          enabled: face?.enabled ?? face?.texture !== null,
+        },
+      ];
+    }),
+  );
+}
+
 export function captureSnapshot(viewport?: ViewportSnapshot) {
   if (Project === undefined) return undefined;
   return {
@@ -34,6 +63,15 @@ export function captureSnapshot(viewport?: ViewportSnapshot) {
       id: Project.uuid ?? Project.name ?? "untitled-project",
       name: Project.name ?? "Untitled Blockbench Project",
       formatId: Project.format?.id ?? "unknown",
+      ...(Project.texture_width !== undefined &&
+      Project.texture_height !== undefined
+        ? {
+            textureSize: {
+              width: Project.texture_width,
+              height: Project.texture_height,
+            },
+          }
+        : {}),
     },
     selection: Outliner.selected.map((node) => node.uuid),
     outline: Outliner.root.map(serializeOutline),
@@ -56,6 +94,9 @@ export function captureSnapshot(viewport?: ViewportSnapshot) {
         bounds: { min: [...cube.from], max: [...cube.to] },
         rotation: cube.rotation === undefined ? [0, 0, 0] : [...cube.rotation],
         visible: cube.visibility ?? true,
+        ...(serializeFaces(cube) === undefined
+          ? {}
+          : { faces: serializeFaces(cube) }),
       })),
     ...(viewport === undefined ? {} : { viewport }),
     capturedAt: new Date().toISOString(),
