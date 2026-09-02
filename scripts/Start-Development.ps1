@@ -10,7 +10,6 @@ param(
 $ErrorActionPreference = 'Stop'
 $repoRoot = Split-Path -Parent $PSScriptRoot
 $blockbenchExe = Join-Path $env:LOCALAPPDATA 'Programs\Blockbench\Blockbench.exe'
-$serverScript = Join-Path $repoRoot 'apps\mcp-server\dist\cli.js'
 
 if (-not (Test-Path -LiteralPath $blockbenchExe -PathType Leaf)) {
     throw "Blockbench was not found at $blockbenchExe"
@@ -40,14 +39,8 @@ if ([string]::IsNullOrWhiteSpace($Token)) {
 if ($Token.Length -lt 32) { throw 'Token must contain at least 32 characters.' }
 
 $previousToken = $env:BLOCKBENCH_CODEX_TOKEN
-$previousPort = $env:BLOCKBENCH_CODEX_PORT
 $previousElectronMode = $env:ELECTRON_RUN_AS_NODE
 try {
-    $env:BLOCKBENCH_CODEX_TOKEN = $Token
-    $env:BLOCKBENCH_CODEX_PORT = $Port.ToString()
-    $nodeExe = (Get-Command node -ErrorAction Stop).Source
-    $serverProcess = Start-Process -FilePath $nodeExe -ArgumentList @($serverScript) -WindowStyle Hidden -PassThru
-
     Remove-Item Env:ELECTRON_RUN_AS_NODE -ErrorAction SilentlyContinue
     $blockbenchArguments = @()
     if (-not [string]::IsNullOrWhiteSpace($ProjectPath)) {
@@ -64,14 +57,11 @@ try {
 finally {
     if ($null -eq $previousToken) { Remove-Item Env:BLOCKBENCH_CODEX_TOKEN -ErrorAction SilentlyContinue }
     else { $env:BLOCKBENCH_CODEX_TOKEN = $previousToken }
-    if ($null -eq $previousPort) { Remove-Item Env:BLOCKBENCH_CODEX_PORT -ErrorAction SilentlyContinue }
-    else { $env:BLOCKBENCH_CODEX_PORT = $previousPort }
     if ($null -eq $previousElectronMode) { Remove-Item Env:ELECTRON_RUN_AS_NODE -ErrorAction SilentlyContinue }
     else { $env:ELECTRON_RUN_AS_NODE = $previousElectronMode }
 }
 
 [pscustomobject]@{
-    ServerPid = $serverProcess.Id
     BlockbenchPid = $blockbenchProcess.Id
     McpUrl = "http://127.0.0.1:$Port/mcp"
     Token = $Token
