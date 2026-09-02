@@ -44,6 +44,7 @@ export function createAssistantPanel(
           previewFirst: true,
           viewportAttached: false,
           poller: undefined as ReturnType<typeof setInterval> | undefined,
+          reconnecting: false,
         };
       },
       computed: {
@@ -92,7 +93,20 @@ export function createAssistantPanel(
         },
         async pollEvents() {
           const bridge = settings();
-          if (!bridge || !this.sessionId) return;
+          if (!bridge) {
+            this.connected = false;
+            return;
+          }
+          if (!this.sessionId) {
+            if (this.reconnecting) return;
+            this.reconnecting = true;
+            try {
+              await this.newChat(false);
+            } finally {
+              this.reconnecting = false;
+            }
+            return;
+          }
           try {
             const incoming = await fetchChatEvents(
               bridge,

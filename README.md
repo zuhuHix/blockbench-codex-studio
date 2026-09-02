@@ -2,7 +2,7 @@
 
 A clean-room, Windows-first Blockbench assistant that exposes safe, typed modeling workflows to Codex through the Model Context Protocol (MCP).
 
-The project is currently at the blueprint stage. The immediate goal is the first vertical slice: connect Codex to Blockbench, inspect the active project, capture the viewport, make reversible draft edits, and connect selected geometry while preserving dimensions, groups, bounds, and Undo behavior.
+The first playable vertical slice is complete: Codex can connect to Blockbench, inspect the active project, capture the viewport, stage reversible draft edits, and connect selected geometry while preserving dimensions, groups, bounds, and Undo behavior. Phase 4 UV continuity is the next implementation phase.
 
 ## Source of truth
 
@@ -18,6 +18,9 @@ Read [BLOCKBENCH_CODEX_MCP_MASTER_BLUEPRINT.md](docs/BLOCKBENCH_CODEX_MCP_MASTER
 - Authenticated read-only MCP bridge and installable development plugin added
 - First Phase 2 draft path added: stage size-preserving cube moves, validate live state, commit through the bridge, and apply as one Blockbench Undo entry
 - First Phase 3 semantic path added: infer the selected anchor, arrange same-group cubes into a physically overlapping chain, enforce project bounds, and publish a post-commit viewport capture
+- Native keyboard-first assistant panel added with preview-first and direct-apply modes, viewport context, model selection, stop, copy, and Undo controls
+- Specimen fixture accepted end to end in Blockbench 5.1.6, including exact one-step Undo restoration
+- Clean checkout formatting, lint, test, and build gate established
 - License and final product name intentionally undecided
 
 ## Development

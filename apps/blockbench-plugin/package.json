@@ -4,6 +4,7 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "prebuild": "npm run build -w @blockbench-codex/contracts",
     "build": "tsc -p tsconfig.json && node build.mjs"
   },
   "devDependencies": {

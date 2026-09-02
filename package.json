@@ -12,7 +12,7 @@
     "packages/*"
   ],
   "scripts": {
-    "build": "npm run build --workspaces --if-present",
+    "build": "npm run build -w @blockbench-codex/contracts && npm run build -w @blockbench-codex/geometry && npm run build -w @blockbench-codex/blockbench-plugin && npm run build -w @blockbench-codex/launcher && npm run build -w @blockbench-codex/mcp-server && npm run build -w @blockbench-codex/profiles && npm run build -w @blockbench-codex/uv",
     "check": "npm run format:check && npm run lint && npm test && npm run build",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
