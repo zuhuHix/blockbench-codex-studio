@@ -127,6 +127,14 @@ Roles are `shape`, `palette`, `layout`, `style`, and `edit-target`. `plan_image_
 
 The plan is `dispatchable: false` when a reference was detached or listed twice, when an editing mode (`edit-current-texture`, `inpaint-region`, `outpaint-extend`, `variation`, `pixel-art-conversion`) does not carry exactly one `edit-target`, or when no backend is configured. Advisory warnings, such as API cost or a decal without transparency, leave the plan dispatchable. Actual provider dispatch and the preview gallery arrive with the next Phase 5 slice.
 
+## Phase 5 preview gallery
+
+Generated results are recorded with `record_image_variant` and reviewed in the **Codex Images** panel before anything is saved or imported. Recording a variant never writes a file, imports a texture, or touches the model.
+
+The panel polls `GET /bridge/image-variants` for metadata and fetches each image as a data URL through `GET /bridge/image-variants/:id`, because a Blockbench `img` element cannot carry the bridge bearer token. The grid shows thumbnails newest first; opening one gives a fit-to-panel viewer with zoom (wheel or buttons, 25%-1600%), drag panning, a transparency checkerboard, a pixel grid above 600%, and side-by-side comparison with a second variant. Metadata lists dimensions, format, alpha, provider, mode, seed, generation time, and the full prompt.
+
+Each variant can be favorited, discarded, or attached as a named reference in any role, which feeds straight back into the reference manager. The store keeps the 24 most recent variants and evicts unfavorited ones first, so favorites survive a long session. `hasAlphaChannel` reports only that the image _can_ carry transparency; whether the pixels are genuinely transparent rather than a painted checkerboard is verified at import in the next slice.
+
 ## Workspace map
 
 - `apps/blockbench-plugin`: in-process Blockbench adapter and UI

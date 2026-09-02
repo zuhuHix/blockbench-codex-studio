@@ -10,11 +10,13 @@ import {
 } from "./image-providers.js";
 import { ReferenceStore } from "./reference-store.js";
 import { planImageGeneration } from "./image-requests.js";
+import { VariantStore } from "./variant-store.js";
 import {
   bounds3Schema,
   cubeFaceNameSchema,
   cubeFaceUvSchema,
   imageGenerationModeSchema,
+  imageProviderIdSchema,
   imageMimeTypeSchema,
   imageReferenceRoleSchema,
   imageReferenceSourceSchema,
@@ -88,6 +90,7 @@ export function createMcpServer(
   drafts: DraftStore,
   imageProbes: ImageProviderProbes = defaultImageProviderProbes,
   references = new ReferenceStore(),
+  variants = new VariantStore(),
 ): McpServer {
   const server = new McpServer({
     name: "blockbench-codex-studio",
@@ -649,6 +652,67 @@ export function createMcpServer(
           await detectImageProviders(imageProbes),
         ),
       ),
+  );
+
+  server.registerTool(
+    "record_image_variant",
+    {
+      description:
+        "Record a generated image in the preview gallery. Recording never saves a file, imports a texture, or changes the model.",
+      annotations: draftAnnotations,
+      inputSchema: {
+        name: z.string().min(1).max(80),
+        mode: imageGenerationModeSchema,
+        prompt: z.string().min(1).max(2000),
+        providerId: imageProviderIdSchema,
+        mimeType: imageMimeTypeSchema,
+        dataBase64: z.string().min(1),
+        width: z.number().int().positive().max(4096),
+        height: z.number().int().positive().max(4096),
+        requestId: z.string().min(1).optional(),
+        seed: z.number().int().nonnegative().optional(),
+        generationMs: z.number().int().nonnegative().optional(),
+      },
+    },
+    (input) => jsonContent(variants.add(input)),
+  );
+
+  server.registerTool(
+    "list_image_variants",
+    {
+      description:
+        "List generated variants newest first with their prompt, provider, dimensions, alpha, and favorite state. Image payloads are not returned.",
+      annotations: readOnlyAnnotations,
+    },
+    () => jsonContent({ variants: variants.list() }),
+  );
+
+  server.registerTool(
+    "use_variant_as_reference",
+    {
+      description:
+        "Attach an existing generated variant as a named reference for a follow-up request.",
+      annotations: draftAnnotations,
+      inputSchema: {
+        variantId: z.string().min(1),
+        role: imageReferenceRoleSchema,
+        name: z.string().min(1).max(80).optional(),
+      },
+    },
+    ({ variantId, role, name }) => {
+      const variant = variants.get(variantId);
+      return jsonContent(
+        references.add({
+          name: name ?? variant.name,
+          source: "generated-variant",
+          role,
+          mimeType: variant.mimeType,
+          dataBase64: variants.payload(variantId),
+          width: variant.width,
+          height: variant.height,
+        }),
+      );
+    },
   );
 
   return server;

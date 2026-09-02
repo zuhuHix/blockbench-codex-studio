@@ -118,6 +118,34 @@ export const imageGenerationPlanSchema = z.object({
   plannedAt: z.iso.datetime(),
 });
 
+/** One generated result. Nothing is imported or saved because it exists. */
+export const imageVariantSchema = z.object({
+  id: z.string().min(1),
+  name: z.string().min(1).max(80),
+  requestId: z.string().min(1).optional(),
+  mode: imageGenerationModeSchema,
+  prompt: z.string().min(1),
+  providerId: imageProviderIdSchema,
+  seed: z.number().int().nonnegative().optional(),
+  mimeType: imageMimeTypeSchema,
+  width: z.number().int().positive(),
+  height: z.number().int().positive(),
+  byteLength: z.number().int().positive(),
+  /** The image can carry transparency; real pixel alpha is verified at import. */
+  hasAlphaChannel: z.boolean(),
+  generationMs: z.number().int().nonnegative().optional(),
+  favorite: z.boolean(),
+  createdAt: z.iso.datetime(),
+});
+
+export const imageVariantImageSchema = z.object({
+  variant: imageVariantSchema,
+  dataBase64: z.string().min(1),
+});
+
+export type ImageVariant = z.infer<typeof imageVariantSchema>;
+export type ImageVariantImage = z.infer<typeof imageVariantImageSchema>;
+
 export type ImageReferenceSource = z.infer<typeof imageReferenceSourceSchema>;
 export type ImageReferenceRole = z.infer<typeof imageReferenceRoleSchema>;
 export type ImageMimeType = z.infer<typeof imageMimeTypeSchema>;

@@ -10,6 +10,7 @@ import type * as NodeProcess from "node:process";
 import { captureSnapshot, captureViewport } from "./snapshot.js";
 import { applyCommand } from "./command-applier.js";
 import { createAssistantPanel } from "./assistant-panel.js";
+import { createGalleryPanel } from "./gallery-panel.js";
 
 const tokenStorageKey = "blockbench_codex_studio_token";
 let publishTimer: ReturnType<typeof setInterval> | undefined;
@@ -18,6 +19,8 @@ let captureAction: Action | undefined;
 let applyingCommand = false;
 let assistantPanel: Panel | undefined;
 let assistantStyles: { delete(): void } | undefined;
+let galleryPanel: Panel | undefined;
+let galleryStyles: { delete(): void } | undefined;
 let companionStart: Promise<void> | undefined;
 let ownedCompanion: ChildProcess.ChildProcess | undefined;
 
@@ -196,6 +199,9 @@ Plugin.register("blockbench_codex_studio", {
     const assistant = createAssistantPanel(currentSettings, showConfiguration);
     assistantPanel = assistant.panel;
     assistantStyles = assistant.styles;
+    const gallery = createGalleryPanel(currentSettings);
+    galleryPanel = gallery.panel;
+    galleryStyles = gallery.styles;
     configureAction = new Action("blockbench_codex_configure", {
       name: "Configure Codex Studio",
       description: "Set the local MCP bridge bearer token.",
@@ -235,5 +241,7 @@ Plugin.register("blockbench_codex_studio", {
     captureAction?.delete();
     assistantPanel?.delete();
     assistantStyles?.delete();
+    galleryPanel?.delete();
+    galleryStyles?.delete();
   },
 });

@@ -3,6 +3,9 @@ import type { captureSnapshot } from "./snapshot.js";
 import type {
   BridgeCommand,
   CommandAcknowledgement,
+  ImageReference,
+  ImageReferenceRole,
+  ImageVariant,
 } from "@blockbench-codex/contracts";
 
 export interface BridgeSettings {
@@ -158,4 +161,76 @@ export async function publishSnapshot(
   snapshot: Snapshot,
 ): Promise<void> {
   await requestJson(settings, "/bridge/snapshot", "POST", snapshot);
+}
+
+export async function fetchImageVariants(
+  settings: BridgeSettings,
+): Promise<readonly ImageVariant[]> {
+  const result = await requestJson<{ variants: ImageVariant[] }>(
+    settings,
+    "/bridge/image-variants",
+    "GET",
+  );
+  return result.variants;
+}
+
+/** Returns a data URL, because the panel cannot send a bearer header on img. */
+export async function fetchVariantDataUrl(
+  settings: BridgeSettings,
+  variantId: string,
+): Promise<string> {
+  const result = await requestJson<{
+    variant: ImageVariant;
+    dataBase64: string;
+  }>(settings, `/bridge/image-variants/${variantId}`, "GET");
+  return `data:${result.variant.mimeType};base64,${result.dataBase64}`;
+}
+
+export function setVariantFavorite(
+  settings: BridgeSettings,
+  variantId: string,
+  favorite: boolean,
+): Promise<ImageVariant> {
+  return requestJson(
+    settings,
+    `/bridge/image-variants/${variantId}/favorite`,
+    "POST",
+    { favorite },
+  );
+}
+
+export function removeVariant(
+  settings: BridgeSettings,
+  variantId: string,
+): Promise<ImageVariant> {
+  return requestJson(
+    settings,
+    `/bridge/image-variants/${variantId}/remove`,
+    "POST",
+    {},
+  );
+}
+
+export function attachVariantAsReference(
+  settings: BridgeSettings,
+  variantId: string,
+  role: ImageReferenceRole,
+): Promise<ImageReference> {
+  return requestJson(
+    settings,
+    `/bridge/image-variants/${variantId}/reference`,
+    "POST",
+    { role },
+  );
+}
+
+export async function fetchImageReferences(
+  settings: BridgeSettings,
+): Promise<readonly ImageReference[]> {
+  const result = await requestJson<{ references: ImageReference[] }>(
+    settings,
+    "/bridge/image-references",
+    "GET",
+  );
+  return result.references;
 }

@@ -125,6 +125,83 @@ describe("studio HTTP app", () => {
     await request(app).get("/bridge/image-providers").expect(401);
   });
 
+  it("serves the gallery, favorites, and reference reuse over the bridge", async () => {
+    const pngBase64 = Buffer.from([
+      0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a,
+    ]).toString("base64");
+    const client = new Client({ name: "gallery-test", version: "1.0.0" });
+    const server = await startStudioServer({ token, port: 0 });
+    try {
+      const transport = new StreamableHTTPClientTransport(
+        new URL(`http://127.0.0.1:${server.port}/mcp`),
+        { requestInit: { headers: authorization } },
+      );
+      await client.connect(transport);
+      await client.callTool({
+        name: "record_image_variant",
+        arguments: {
+          name: "Lab wall",
+          mode: "new-seamless-texture",
+          prompt: "mossy lab wall",
+          providerId: "comfyui",
+          mimeType: "image/png",
+          dataBase64: pngBase64,
+          width: 64,
+          height: 64,
+        },
+      });
+
+      const listed = await request(server.app)
+        .get("/bridge/image-variants")
+        .set(authorization)
+        .expect(200);
+      const [variant] = (listed.body as { variants: { id: string }[] })
+        .variants;
+      expect(variant).toBeDefined();
+      expect(listed.text).not.toContain(pngBase64);
+
+      const image = await request(server.app)
+        .get(`/bridge/image-variants/${variant!.id}`)
+        .set(authorization)
+        .expect(200);
+      expect((image.body as { dataBase64: string }).dataBase64).toBe(pngBase64);
+
+      const favorited = await request(server.app)
+        .post(`/bridge/image-variants/${variant!.id}/favorite`)
+        .set(authorization)
+        .send({ favorite: true })
+        .expect(200);
+      expect((favorited.body as { favorite: boolean }).favorite).toBe(true);
+
+      const reference = await request(server.app)
+        .post(`/bridge/image-variants/${variant!.id}/reference`)
+        .set(authorization)
+        .send({ role: "palette" })
+        .expect(201);
+      expect(reference.body).toMatchObject({
+        source: "generated-variant",
+        role: "palette",
+        name: "Lab wall",
+      });
+      await request(server.app)
+        .get("/bridge/image-references")
+        .set(authorization)
+        .expect(200);
+
+      await request(server.app)
+        .post(`/bridge/image-variants/${variant!.id}/remove`)
+        .set(authorization)
+        .expect(200);
+      await request(server.app)
+        .get(`/bridge/image-variants/${variant!.id}`)
+        .set(authorization)
+        .expect(404);
+      await client.close();
+    } finally {
+      await server.close();
+    }
+  });
+
   it("rejects malformed snapshots", async () => {
     const app = createStudioApp(token);
     await request(app)
@@ -191,6 +268,9 @@ describe("studio HTTP app", () => {
         "list_image_references",
         "remove_image_reference",
         "plan_image_generation",
+        "record_image_variant",
+        "list_image_variants",
+        "use_variant_as_reference",
       ]);
       expect(
         tools.tools.find((tool) => tool.name === "get_selection")?.annotations,
