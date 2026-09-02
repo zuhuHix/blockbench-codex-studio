@@ -13,6 +13,19 @@ import {
   layoutConnectedChain,
 } from "@blockbench-codex/geometry";
 
+const readOnlyAnnotations = {
+  readOnlyHint: true,
+  destructiveHint: false,
+  idempotentHint: true,
+  openWorldHint: false,
+} as const;
+const draftAnnotations = {
+  readOnlyHint: false,
+  destructiveHint: false,
+  idempotentHint: false,
+  openWorldHint: false,
+} as const;
+
 function jsonContent(value: unknown) {
   return {
     content: [{ type: "text" as const, text: JSON.stringify(value, null, 2) }],
@@ -43,6 +56,7 @@ export function createMcpServer(
     {
       description:
         "Check MCP server health and the live Blockbench bridge connection.",
+      annotations: readOnlyAnnotations,
     },
     () => jsonContent({ server: "ok", blockbench: store.status() }),
   );
@@ -52,6 +66,7 @@ export function createMcpServer(
     {
       description:
         "Inspect the active Blockbench project without modifying it.",
+      annotations: readOnlyAnnotations,
     },
     () => {
       const snapshot = requireSnapshot(store);
@@ -69,6 +84,7 @@ export function createMcpServer(
     {
       description:
         "Return selected Blockbench element IDs and their current geometry.",
+      annotations: readOnlyAnnotations,
     },
     () => {
       const snapshot = requireSnapshot(store);
@@ -87,6 +103,7 @@ export function createMcpServer(
     {
       description:
         "Return the active Blockbench Outliner hierarchy with authoritative IDs.",
+      annotations: readOnlyAnnotations,
     },
     () => jsonContent(requireSnapshot(store).outline),
   );
@@ -96,6 +113,7 @@ export function createMcpServer(
     {
       description:
         "Return the latest viewport capture published by the Blockbench plugin.",
+      annotations: readOnlyAnnotations,
     },
     () => {
       const viewport = requireSnapshot(store).viewport;
@@ -128,6 +146,7 @@ export function createMcpServer(
     "begin_draft",
     {
       description: "Begin an isolated, reversible Blockbench edit draft.",
+      annotations: draftAnnotations,
       inputSchema: { label: z.string().min(1).max(120) },
     },
     ({ label }) => jsonContent(drafts.begin(requireSnapshot(store), label)),
@@ -137,6 +156,7 @@ export function createMcpServer(
     "move_cube_preserve_size",
     {
       description: "Add a size-preserving cube translation to a draft.",
+      annotations: draftAnnotations,
       inputSchema: {
         transactionId: transactionIdSchema,
         elementId: z.string().min(1),
@@ -153,6 +173,7 @@ export function createMcpServer(
     "get_draft_summary",
     {
       description: "Inspect the exact operations currently staged in a draft.",
+      annotations: readOnlyAnnotations,
       inputSchema: { transactionId: transactionIdSchema },
     },
     ({ transactionId }) => jsonContent(drafts.get(transactionId)),
@@ -163,6 +184,7 @@ export function createMcpServer(
     {
       description:
         "Validate staged operations against current project, group, bounds, and dimension invariants.",
+      annotations: readOnlyAnnotations,
       inputSchema: { transactionId: transactionIdSchema },
     },
     ({ transactionId }) =>
@@ -174,6 +196,7 @@ export function createMcpServer(
     {
       description:
         "Queue a validated draft as one named Blockbench Undo transaction.",
+      annotations: draftAnnotations,
       inputSchema: { transactionId: transactionIdSchema },
     },
     ({ transactionId }) =>
@@ -188,6 +211,7 @@ export function createMcpServer(
     {
       description:
         "Discard a draft without changing the live Blockbench project.",
+      annotations: draftAnnotations,
       inputSchema: { transactionId: transactionIdSchema },
     },
     ({ transactionId }) => {
@@ -201,6 +225,7 @@ export function createMcpServer(
     {
       description:
         "Infer the anchor among selected cubes and stage a deterministic, size-preserving connected chain in their shared group.",
+      annotations: draftAnnotations,
       inputSchema: {
         label: z.string().min(1).max(120).default("Connect selected chain"),
         overlap: z.number().positive().max(1).default(0.25),
@@ -240,6 +265,7 @@ export function createMcpServer(
     {
       description:
         "Inspect physical overlap/contact and connected components among the currently selected cubes.",
+      annotations: readOnlyAnnotations,
       inputSchema: { tolerance: z.number().nonnegative().max(1).default(0) },
     },
     ({ tolerance }) => {
