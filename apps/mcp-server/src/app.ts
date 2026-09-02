@@ -13,6 +13,11 @@ import { createMcpServer } from "./mcp.js";
 import { SnapshotStore } from "./snapshot-store.js";
 import { DraftStore } from "./draft-store.js";
 import { ChatManager } from "./chat-manager.js";
+import {
+  defaultImageProviderProbes,
+  detectImageProviders,
+  type ImageProviderProbes,
+} from "./image-providers.js";
 
 const chatMessageSchema = z.object({
   prompt: z.string(),
@@ -25,6 +30,7 @@ export interface StudioServerOptions {
   readonly host?: "127.0.0.1";
   readonly port?: number;
   readonly store?: SnapshotStore;
+  readonly imageProbes?: ImageProviderProbes;
 }
 
 export interface RunningStudioServer {
@@ -40,6 +46,7 @@ export function createStudioApp(
   token: string,
   store = new SnapshotStore(),
   port = 48172,
+  imageProbes: ImageProviderProbes = defaultImageProviderProbes,
 ): Express {
   const app = createMcpExpressApp({ host: "127.0.0.1" });
   const authenticate = createBearerAuth(token);
@@ -113,6 +120,19 @@ export function createStudioApp(
     response.json({ server: "ok", blockbench: store.status() });
   });
 
+  app.get("/bridge/image-providers", authenticate, (_request, response) => {
+    void detectImageProviders(imageProbes).then(
+      (report) => response.json(report),
+      (error: unknown) =>
+        response.status(500).json({
+          error:
+            error instanceof Error
+              ? error.message
+              : "Image provider detection failed.",
+        }),
+    );
+  });
+
   app.post("/bridge/snapshot", authenticate, (request, response) => {
     const parsed = blockbenchSnapshotSchema.safeParse(request.body);
     if (!parsed.success) {
@@ -141,7 +161,7 @@ export function createStudioApp(
   });
 
   app.post("/mcp", authenticate, async (request, response) => {
-    const server = createMcpServer(store, drafts);
+    const server = createMcpServer(store, drafts, imageProbes);
     const transport = new StreamableHTTPServerTransport({
       sessionIdGenerator: undefined,
     });
@@ -184,7 +204,12 @@ export async function startStudioServer(
 ): Promise<RunningStudioServer> {
   const host = options.host ?? "127.0.0.1";
   const store = options.store ?? new SnapshotStore();
-  const app = createStudioApp(options.token, store, options.port ?? 48172);
+  const app = createStudioApp(
+    options.token,
+    store,
+    options.port ?? 48172,
+    options.imageProbes ?? defaultImageProviderProbes,
+  );
   const httpServer = await new Promise<Server>((resolve, reject) => {
     const listeningServer = app.listen(options.port ?? 48172, host, () =>
       resolve(listeningServer),

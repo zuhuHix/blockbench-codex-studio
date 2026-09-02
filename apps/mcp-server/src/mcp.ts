@@ -4,6 +4,11 @@ import type { BlockbenchSnapshot } from "@blockbench-codex/contracts";
 import type { SnapshotStore } from "./snapshot-store.js";
 import type { DraftStore } from "./draft-store.js";
 import {
+  defaultImageProviderProbes,
+  detectImageProviders,
+  type ImageProviderProbes,
+} from "./image-providers.js";
+import {
   bounds3Schema,
   cubeFaceNameSchema,
   cubeFaceUvSchema,
@@ -29,6 +34,13 @@ const readOnlyAnnotations = {
   destructiveHint: false,
   idempotentHint: true,
   openWorldHint: false,
+} as const;
+/** Read-only, but reaches outside the process to probe local providers. */
+const probeAnnotations = {
+  readOnlyHint: true,
+  destructiveHint: false,
+  idempotentHint: true,
+  openWorldHint: true,
 } as const;
 const draftAnnotations = {
   readOnlyHint: false,
@@ -67,6 +79,7 @@ function requireTextureSize(snapshot: BlockbenchSnapshot) {
 export function createMcpServer(
   store: SnapshotStore,
   drafts: DraftStore,
+  imageProbes: ImageProviderProbes = defaultImageProviderProbes,
 ): McpServer {
   const server = new McpServer({
     name: "blockbench-codex-studio",
@@ -504,6 +517,16 @@ export function createMcpServer(
         }
       return jsonContent(summary);
     },
+  );
+
+  server.registerTool(
+    "detect_image_providers",
+    {
+      description:
+        "Report which image generation backends are configured, which one will be used, and whether it may incur API cost. Never returns secrets.",
+      annotations: probeAnnotations,
+    },
+    async () => jsonContent(await detectImageProviders(imageProbes)),
   );
 
   return server;

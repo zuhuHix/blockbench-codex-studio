@@ -5,6 +5,7 @@ import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/
 import { blockbenchSnapshotSchema } from "@blockbench-codex/contracts";
 
 import { createStudioApp, startStudioServer } from "./app.js";
+import { SnapshotStore } from "./snapshot-store.js";
 
 const token = "test-token-that-is-at-least-32-characters-long";
 const authorization = { Authorization: `Bearer ${token}` };
@@ -104,6 +105,26 @@ describe("studio HTTP app", () => {
     });
   });
 
+  it("serves the image provider report without leaking credentials", async () => {
+    const app = createStudioApp(token, new SnapshotStore(), 48172, {
+      env: { OPENAI_API_KEY: "sk-secret-value" },
+      codexInstalled: () => false,
+      credentialStored: () => Promise.resolve(false),
+      comfyUiReachable: () => Promise.resolve(false),
+      now: () => new Date("2026-09-02T10:00:00.000Z"),
+    });
+    const response = await request(app)
+      .get("/bridge/image-providers")
+      .set(authorization)
+      .expect(200);
+    expect(response.body).toMatchObject({
+      selectedProviderId: "openai-image",
+      incursApiCost: true,
+    });
+    expect(response.text).not.toContain("sk-secret-value");
+    await request(app).get("/bridge/image-providers").expect(401);
+  });
+
   it("rejects malformed snapshots", async () => {
     const app = createStudioApp(token);
     await request(app)
@@ -165,6 +186,7 @@ describe("studio HTTP app", () => {
         "audit_uv_seams",
         "pack_uv_islands",
         "normalize_texel_density",
+        "detect_image_providers",
       ]);
       expect(
         tools.tools.find((tool) => tool.name === "get_selection")?.annotations,

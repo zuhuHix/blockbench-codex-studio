@@ -103,6 +103,22 @@ codex mcp add blockbench-codex-studio --url http://127.0.0.1:48172/mcp --bearer-
 
 Do not commit the token or place it in the Blockbench project file.
 
+## Phase 5 image provider detection
+
+The `detect_image_providers` MCP tool and the authenticated `GET /bridge/image-providers` endpoint report every image generation backend, which one will be used, and whether it may bill the user. The report never contains a key, only where one was found.
+
+| Backend          | Configuration                                                                                                                  | Cost                          |
+| ---------------- | ------------------------------------------------------------------------------------------------------------------------------ | ----------------------------- |
+| Codex-native     | Codex CLI installed **and** `BLOCKBENCH_CODEX_NATIVE_IMAGES=1`                                                                 | none                          |
+| Local ComfyUI    | an instance answering `/system_stats` at `BLOCKBENCH_CODEX_COMFYUI_URL` (default `http://127.0.0.1:8188`)                      | none                          |
+| OpenAI GPT Image | `BLOCKBENCH_CODEX_OPENAI_API_KEY`, `OPENAI_API_KEY`, or the `BlockbenchCodexStudio:OpenAI` entry in Windows Credential Manager | billed to your OpenAI account |
+
+Cost-free backends are selected first, so nothing bills the account while a local option works. A Codex or ChatGPT login is never assumed to grant image generation; it requires the explicit opt-in above. Store the API key with Windows Credential Manager rather than in the repository or a project file:
+
+```powershell
+cmdkey /generic:BlockbenchCodexStudio:OpenAI /user:openai /pass
+```
+
 ## Workspace map
 
 - `apps/blockbench-plugin`: in-process Blockbench adapter and UI
