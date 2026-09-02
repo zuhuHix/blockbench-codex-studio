@@ -19,11 +19,7 @@ type ProviderOption = {
   readonly id: string;
   readonly label: string;
   readonly icon: string;
-  readonly models: ReadonlyArray<{
-    value: string;
-    label: string;
-    hint: string;
-  }>;
+  readonly models: ReadonlyArray<{ value: string; label: string }>;
   readonly efforts: readonly string[];
   readonly defaultEffort: string;
 };
@@ -34,9 +30,9 @@ const providers: readonly ProviderOption[] = [
     label: "Codex",
     icon: "bolt",
     models: [
-      { value: "gpt-5.6-sol", label: "Sol", hint: "Quality" },
-      { value: "gpt-5.6-terra", label: "Terra", hint: "Balanced" },
-      { value: "gpt-5.6-luna", label: "Luna", hint: "Fast" },
+      { value: "gpt-5.6-sol", label: "Sol" },
+      { value: "gpt-5.6-terra", label: "Terra" },
+      { value: "gpt-5.6-luna", label: "Luna" },
     ],
     efforts: ["minimal", "low", "medium", "high", "xhigh"],
     defaultEffort: "medium",
@@ -46,9 +42,9 @@ const providers: readonly ProviderOption[] = [
     label: "Claude",
     icon: "auto_awesome",
     models: [
-      { value: "claude-opus-5", label: "Opus 5", hint: "Quality" },
-      { value: "claude-sonnet-5", label: "Sonnet 5", hint: "Balanced" },
-      { value: "claude-haiku-4-5", label: "Haiku 4.5", hint: "Fast" },
+      { value: "claude-opus-5", label: "Opus 5" },
+      { value: "claude-sonnet-5", label: "Sonnet 5" },
+      { value: "claude-haiku-4-5", label: "Haiku 4.5" },
     ],
     efforts: ["low", "medium", "high", "xhigh", "max"],
     defaultEffort: "medium",
@@ -81,7 +77,6 @@ export function createAssistantPanel(
           providerId: localStorage.getItem(providerKey) ?? "codex",
           model: localStorage.getItem(modelKey) ?? "gpt-5.6-terra",
           effort: localStorage.getItem(effortKey) ?? "medium",
-          modelMenuOpen: false,
           sessionId: "",
           events: [] as ChatEvent[],
           messages: [] as Array<{ role: string; text: string }>,
@@ -308,7 +303,7 @@ export function createAssistantPanel(
             <article v-for="(message,index) in messages" :key="index" class="bcs-message" :class="message.role"><div class="bcs-message-heading"><b>{{ message.role==='you'?'You':message.role==='error'?'Error':message.role==='status'?'System':provider.label }}</b><button v-if="message.role==='codex'" title="Copy message" @click="copyMessage(message.text)"><span class="material-icons">content_copy</span></button></div><p>{{ message.text }}</p></article>
             <details v-if="toolEvents.length" class="bcs-events" :open="showDetails" @toggle="showDetails=$event.target.open"><summary><span class="material-icons">account_tree</span>{{ toolEvents.length }} MCP events</summary><div v-for="event in toolEvents" :key="event.id"><span>{{ eventLabel(event) }}</span><pre v-if="showDetails">{{ JSON.stringify(event.detail,null,2) }}</pre></div></details>
           </main>
-          <section class="bcs-context"><div class="bcs-chips"><span v-for="item in selection.slice(0,4)" :key="item.uuid" class="bcs-chip"><span class="material-icons">check_box</span>{{ item.name }}</span><span v-if="selection.length>4" class="bcs-chip">+{{ selection.length-4 }}</span><span v-if="viewportAttached" class="bcs-chip accent"><span class="material-icons">photo_camera</span>Viewport</span></div><div class="bcs-toolbar"><label><input type="checkbox" v-model="previewFirst"> Preview first</label><button class="bcs-provider" :disabled="working" @click="switchProvider" :title="'Using ' + provider.label + ' · click to switch to ' + otherProvider.label + ' (starts a new chat)'"><span class="material-icons">{{ provider.icon }}</span>{{ provider.label }}</button><select v-model="model" :disabled="working" @mousedown="modelMenuOpen=true" @change="modelMenuOpen=false" @blur="modelMenuOpen=false"><option v-for="entry in provider.models" :key="entry.value" :value="entry.value">{{ modelMenuOpen ? entry.label + ' · ' + entry.hint : entry.label }}</option></select><select v-model="effort" :disabled="working" title="Reasoning effort"><option v-for="level in provider.efforts" :key="level" :value="level">{{ level }}</option></select></div></section>
+          <section class="bcs-context"><div class="bcs-chips"><span v-for="item in selection.slice(0,4)" :key="item.uuid" class="bcs-chip"><span class="material-icons">check_box</span>{{ item.name }}</span><span v-if="selection.length>4" class="bcs-chip">+{{ selection.length-4 }}</span><span v-if="viewportAttached" class="bcs-chip accent"><span class="material-icons">photo_camera</span>Viewport</span></div><div class="bcs-toolbar"><label><input type="checkbox" v-model="previewFirst"> Preview first</label><button class="bcs-provider" :disabled="working" @click="switchProvider" :title="'Using ' + provider.label + ' · click to switch to ' + otherProvider.label + ' (starts a new chat)'"><span class="material-icons">{{ provider.icon }}</span>{{ provider.label }}</button><select v-model="model" :disabled="working" :title="'Model · ' + provider.label"><option v-for="entry in provider.models" :key="entry.value" :value="entry.value">{{ entry.label }}</option></select><select v-model="effort" :disabled="working" title="Reasoning effort"><option v-for="level in provider.efforts" :key="level" :value="level">{{ level }}</option></select></div></section>
           <footer class="bcs-composer"><textarea v-model="prompt" :disabled="working" @keydown.enter.exact.prevent="send" placeholder="Describe what to build or change…"></textarea><button class="bcs-attach" :class="{active:viewportAttached}" @click="toggleViewport" :disabled="working" :title="viewportAttached?'Remove attached viewport':'Attach current viewport'"><span class="material-icons">{{ viewportAttached ? 'close' : 'photo_camera' }}</span></button><button v-if="working" class="bcs-send stop" @click="stop" title="Stop"><span class="material-icons">stop</span></button><button v-else class="bcs-send" @click="send" :disabled="!prompt.trim()||!connected" title="Send"><span class="material-icons">arrow_upward</span></button><button class="bcs-undo" @click="undo"><span class="material-icons">undo</span> Undo</button></footer>
         </div>`,
     } as any,
