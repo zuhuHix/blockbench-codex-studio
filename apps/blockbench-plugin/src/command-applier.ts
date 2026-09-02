@@ -15,24 +15,59 @@ export function applyCommand(command: ApplyDraftCommand): void {
         : cube.parent.uuid;
     if (
       parentId !== operation.expectedParentGroupId ||
-      JSON.stringify(cube.from) !== JSON.stringify(operation.from.min) ||
-      JSON.stringify(cube.to) !== JSON.stringify(operation.from.max)
+      (operation.kind === "move_cube"
+        ? JSON.stringify(cube.from) !== JSON.stringify(operation.from.min) ||
+          JSON.stringify(cube.to) !== JSON.stringify(operation.from.max)
+        : JSON.stringify(
+            cube.faces?.[operation.face] === undefined
+              ? undefined
+              : {
+                  textureId:
+                    cube.faces[operation.face]!.texture === null ||
+                    cube.faces[operation.face]!.texture === undefined
+                      ? null
+                      : String(cube.faces[operation.face]!.texture),
+                  uv: cube.faces[operation.face]!.uv,
+                  rotation: cube.faces[operation.face]!.rotation ?? 0,
+                  enabled:
+                    cube.faces[operation.face]!.enabled ??
+                    cube.faces[operation.face]!.texture !== null,
+                },
+          ) !== JSON.stringify(operation.from))
     )
       throw new Error(
         `Cube ${operation.elementId} changed before the command was applied.`,
       );
     return cube;
   });
-  Undo.initEdit({ elements: cubes });
+  const uniqueCubes = [...new Set(cubes)];
+  Undo.initEdit({ elements: uniqueCubes });
   try {
     command.operations.forEach((operation, index) => {
-      cubes[index]!.from = [...operation.to.min];
-      cubes[index]!.to = [...operation.to.max];
+      if (operation.kind === "move_cube") {
+        cubes[index]!.from = [...operation.to.min];
+        cubes[index]!.to = [...operation.to.max];
+      } else {
+        const target = cubes[index]!.faces?.[operation.face];
+        if (target === undefined)
+          throw new Error(
+            `Cube ${operation.elementId} ${operation.face} face is unavailable.`,
+          );
+        target.uv = [...operation.to.uv];
+        target.texture = operation.to.textureId;
+        target.rotation = operation.to.rotation;
+        target.enabled = operation.to.enabled;
+      }
     });
-    Undo.finishEdit(command.label, { elements: cubes });
+    Undo.finishEdit(command.label, { elements: uniqueCubes });
     Canvas.updateView({
-      elements: cubes,
-      element_aspects: { geometry: true, transform: true },
+      elements: uniqueCubes,
+      element_aspects: {
+        geometry: true,
+        transform: true,
+        uv: true,
+        faces: true,
+      },
     });
   } catch (error) {
     Undo.cancelEdit(true);

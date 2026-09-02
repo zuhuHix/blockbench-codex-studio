@@ -5,6 +5,8 @@ import {
   type ApplyDraftCommand,
   type BlockbenchSnapshot,
   type Bounds3,
+  type CubeFaceName,
+  type CubeFaceUv,
   type DraftSummary,
   type TransactionId,
 } from "@blockbench-codex/contracts";
@@ -67,18 +69,28 @@ export class DraftStore {
       }
       if (current.parentGroupId !== operation.expectedParentGroupId)
         errors.push(`Cube ${operation.elementId} changed parent groups.`);
-      if (
-        !sameVector(current.bounds.min, operation.from.min) ||
-        !sameVector(current.bounds.max, operation.from.max)
+      if (operation.kind === "move_cube") {
+        if (
+          !sameVector(current.bounds.min, operation.from.min) ||
+          !sameVector(current.bounds.max, operation.from.max)
+        )
+          errors.push(`Cube ${operation.elementId} changed after drafting.`);
+        if (!sameVector(dimensions(operation.from), dimensions(operation.to)))
+          errors.push(`Cube ${operation.elementId} would change dimensions.`);
+        if (
+          snapshot.project.bounds !== undefined &&
+          !containsBounds(snapshot.project.bounds, operation.to)
+        )
+          errors.push(
+            `Cube ${operation.elementId} would leave project bounds.`,
+          );
+      } else if (
+        JSON.stringify(current.faces?.[operation.face]) !==
+        JSON.stringify(operation.from)
       )
-        errors.push(`Cube ${operation.elementId} changed after drafting.`);
-      if (!sameVector(dimensions(operation.from), dimensions(operation.to)))
-        errors.push(`Cube ${operation.elementId} would change dimensions.`);
-      if (
-        snapshot.project.bounds !== undefined &&
-        !containsBounds(snapshot.project.bounds, operation.to)
-      )
-        errors.push(`Cube ${operation.elementId} would leave project bounds.`);
+        errors.push(
+          `Cube ${operation.elementId} ${operation.face} UV changed after drafting.`,
+        );
     }
     return {
       valid: errors.length === 0,
@@ -136,6 +148,61 @@ export class DraftStore {
     return draft.summary;
   }
 
+  setFaceUv(
+    snapshot: BlockbenchSnapshot,
+    transactionId: TransactionId,
+    elementId: string,
+    face: CubeFaceName,
+    to: CubeFaceUv,
+  ): DraftSummary {
+    const draft = this.#drafts.get(transactionId);
+    if (draft === undefined)
+      throw new Error("Draft transaction was not found.");
+    if (draft.projectId !== snapshot.project.id)
+      throw new Error(
+        "The active Blockbench project changed during the draft.",
+      );
+    const element = snapshot.elements.find(
+      (candidate) => candidate.id === elementId,
+    );
+    if (element === undefined) throw new Error("Cube element was not found.");
+    if (element.parentGroupId === "root")
+      throw new Error(
+        "Root-level cubes cannot be UV-mapped by the safe draft tool.",
+      );
+    const from = element.faces?.[face];
+    if (from === undefined)
+      throw new Error(
+        `Cube ${elementId} does not expose all six face mappings.`,
+      );
+    if (
+      draft.summary.operations.some(
+        (operation) =>
+          operation.kind === "set_face_uv" &&
+          operation.elementId === element.id &&
+          operation.face === face,
+      )
+    )
+      throw new Error(
+        "This draft already contains an operation for that cube face.",
+      );
+    draft.summary = draftSummarySchema.parse({
+      ...draft.summary,
+      operations: [
+        ...draft.summary.operations,
+        {
+          kind: "set_face_uv",
+          elementId: element.id,
+          face,
+          from,
+          to,
+          expectedParentGroupId: element.parentGroupId,
+        },
+      ],
+    });
+    return draft.summary;
+  }
+
   commit(
     snapshot: BlockbenchSnapshot,
     transactionId: TransactionId,
@@ -154,8 +221,11 @@ export class DraftStore {
       if (
         current === undefined ||
         current.parentGroupId !== operation.expectedParentGroupId ||
-        !sameVector(current.bounds.min, operation.from.min) ||
-        !sameVector(current.bounds.max, operation.from.max)
+        (operation.kind === "move_cube"
+          ? !sameVector(current.bounds.min, operation.from.min) ||
+            !sameVector(current.bounds.max, operation.from.max)
+          : JSON.stringify(current.faces?.[operation.face]) !==
+            JSON.stringify(operation.from))
       )
         throw new Error(
           `Cube ${operation.elementId} changed after the draft began.`,

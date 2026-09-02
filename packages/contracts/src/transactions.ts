@@ -1,6 +1,12 @@
 import { z } from "zod";
 
-import { bounds3Schema, elementIdSchema, groupIdSchema } from "./scene.js";
+import {
+  bounds3Schema,
+  cubeFaceNameSchema,
+  cubeFaceUvSchema,
+  elementIdSchema,
+  groupIdSchema,
+} from "./scene.js";
 
 export const transactionIdSchema = z.string().uuid().brand<"TransactionId">();
 
@@ -13,8 +19,18 @@ export const moveCubeOperationSchema = z.object({
   expectedParentGroupId: groupIdSchema,
 });
 
+export const setFaceUvOperationSchema = z.object({
+  kind: z.literal("set_face_uv"),
+  elementId: elementIdSchema,
+  face: cubeFaceNameSchema,
+  from: cubeFaceUvSchema,
+  to: cubeFaceUvSchema,
+  expectedParentGroupId: groupIdSchema,
+});
+
 export const draftOperationSchema = z.discriminatedUnion("kind", [
   moveCubeOperationSchema,
+  setFaceUvOperationSchema,
 ]);
 
 export const draftSummarySchema = z.object({
@@ -41,6 +57,7 @@ export const commandAcknowledgementSchema = z.object({
 export type DraftOperation = z.infer<typeof draftOperationSchema>;
 export type DraftSummary = z.infer<typeof draftSummarySchema>;
 export type MoveCubeOperation = z.infer<typeof moveCubeOperationSchema>;
+export type SetFaceUvOperation = z.infer<typeof setFaceUvOperationSchema>;
 export type TransactionId = z.infer<typeof transactionIdSchema>;
 export type ApplyDraftCommand = z.infer<typeof applyDraftCommandSchema>;
 export type CommandAcknowledgement = z.infer<
