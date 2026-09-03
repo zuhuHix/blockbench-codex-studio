@@ -173,6 +173,23 @@ Capturing is read-only by construction:
 
 Tools: `capture_views`. Endpoint: `POST /bridge/view-captures`.
 
+## Phase 6 bounded auto-refinement
+
+Automatic refinement is off until `begin_refinement` is called, and only one run can be active at a time. A run fixes its goal, its pass budget (1-4, default 3), an optional scope group, and the set of cubes that existed when it began. Everything after that is bounded by those choices.
+
+A pass is claimed with `refine_pass`, which captures the standard views at 768x768 or larger and returns them with the pass number and the passes remaining. Claiming a pass past the budget stops the run with `limit-reached` rather than quietly continuing, so a run always ends with a recorded reason: `satisfied`, `limit-reached`, `no-safe-correction`, or `stopped-by-user`.
+
+Corrections go through the normal draft tools, but reach Blockbench only via `commit_refinement_draft`, which re-checks them first (`check_refinement_draft` runs the same rules without committing). A correction is refused when it:
+
+- touches a cube that did not exist when the run began,
+- leaves the scope group,
+- would change a cube's size, or
+- is empty, or larger than 12 operations.
+
+The user's Stop button in the assistant panel calls `POST /bridge/refinement/stop`, which ends the active run as `stopped-by-user` before stopping the chat turn; every later tool call on that session is refused. `stop_refinement` and `get_refinement_report` return the resource report: passes used against the budget, corrections applied, images captured, elapsed time, and the stop reason.
+
+Tools: `begin_refinement`, `refine_pass`, `check_refinement_draft`, `commit_refinement_draft`, `stop_refinement`, `get_refinement_report`. Endpoints: `GET /bridge/refinement` and `POST /bridge/refinement/stop`.
+
 ## Workspace map
 
 - `apps/blockbench-plugin`: in-process Blockbench adapter and UI

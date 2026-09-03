@@ -168,6 +168,15 @@ export async function publishSnapshot(
   await requestJson(settings, "/bridge/snapshot", "POST", snapshot);
 }
 
+/** Stops any active auto-refinement run; harmless when none is running. */
+export async function stopRefinement(settings: BridgeSettings): Promise<void> {
+  try {
+    await requestJson(settings, "/bridge/refinement/stop", "POST", {});
+  } catch {
+    // No refinement run was active, which is the common case.
+  }
+}
+
 export async function publishViewCaptures(
   settings: BridgeSettings,
   capture: MultiViewCapture,

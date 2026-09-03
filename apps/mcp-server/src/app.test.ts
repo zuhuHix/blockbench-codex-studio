@@ -298,6 +298,12 @@ describe("studio HTTP app", () => {
         "set_texture_destination",
         "save_image_variant",
         "import_image_variant",
+        "begin_refinement",
+        "refine_pass",
+        "check_refinement_draft",
+        "commit_refinement_draft",
+        "stop_refinement",
+        "get_refinement_report",
       ]);
       expect(
         tools.tools.find((tool) => tool.name === "get_selection")?.annotations,
@@ -476,6 +482,93 @@ describe("studio HTTP app", () => {
         })
         .expect(202);
       expect(JSON.stringify(await pending)).toContain("no active preview");
+    } finally {
+      await client.close();
+      await running.close();
+    }
+  });
+  it("bounds an auto-refinement run and lets the user stop it", async () => {
+    const running = await startStudioServer({ token, port: 0 });
+    running.store.set(snapshot);
+    const client = new Client({ name: "refine-test", version: "1.0.0" });
+    const transport = new StreamableHTTPClientTransport(
+      new URL(`http://127.0.0.1:${running.port}/mcp`),
+      { requestInit: { headers: authorization } },
+    );
+
+    try {
+      await client.connect(transport);
+      const begun = JSON.stringify(
+        await client.callTool({
+          name: "begin_refinement",
+          arguments: {
+            goal: "Close the gap between the tentacles",
+            maxPasses: 1,
+            scopeGroupId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+          },
+        }),
+      );
+      expect(begun).toContain('\\"maxPasses\\": 1');
+      const sessionId =
+        /([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})/iu.exec(
+          begun,
+        )?.[1];
+      if (sessionId === undefined) throw new Error("Missing session id.");
+
+      const active = await request(running.app)
+        .get("/bridge/refinement")
+        .set(authorization)
+        .expect(200);
+      expect(active.text).toContain("Close the gap");
+
+      const pending = client.callTool({
+        name: "refine_pass",
+        arguments: { sessionId, angles: ["front"], note: "First look" },
+      });
+      const queued = await pollUntil(async () => {
+        const response = await request(running.app)
+          .get("/bridge/commands")
+          .set(authorization)
+          .expect(200);
+        return (response.body as { commands: CapturedCommand[] }).commands.find(
+          (command) => command.action === "capture_views",
+        );
+      });
+      await request(running.app)
+        .post("/bridge/view-captures")
+        .set(authorization)
+        .send({
+          requestId: queued.requestId,
+          projectId: "specimen",
+          views: [
+            {
+              angle: "front",
+              mimeType: "image/png",
+              dataBase64: "aW1hZ2U=",
+              width: 768,
+              height: 768,
+              capturedAt: new Date().toISOString(),
+            },
+          ],
+          capturedAt: new Date().toISOString(),
+        })
+        .expect(202);
+      expect(JSON.stringify(await pending)).toContain('remainingPasses\\":0');
+
+      const stopped = await request(running.app)
+        .post("/bridge/refinement/stop")
+        .set(authorization)
+        .expect(200);
+      expect(stopped.text).toContain('"stopReason":"stopped-by-user"');
+      expect(stopped.text).toContain('"imagesCaptured":1');
+      expect(
+        JSON.stringify(
+          await client.callTool({
+            name: "refine_pass",
+            arguments: { sessionId },
+          }),
+        ),
+      ).toContain("stopped already");
     } finally {
       await client.close();
       await running.close();

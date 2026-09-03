@@ -26,6 +26,7 @@ import { VariantStore } from "./variant-store.js";
 import { TextureDestinationStore } from "./texture-destinations.js";
 import { revealInFileManager } from "./reveal.js";
 import { ViewCaptureStore } from "./view-capture-store.js";
+import { RefinementStore } from "./refinement-store.js";
 import { convertToPixelArt, inspectImageAlpha } from "./image-conversion.js";
 
 const chatMessageSchema = z.object({
@@ -65,6 +66,7 @@ export function createStudioApp(
   const variants = new VariantStore();
   const destinations = new TextureDestinationStore();
   const viewCaptures = new ViewCaptureStore();
+  const refinements = new RefinementStore();
 
   app.post("/bridge/chat/sessions", authenticate, (_request, response) => {
     response.status(201).json({ sessionId: chats.create() });
@@ -458,6 +460,20 @@ export function createStudioApp(
     response.status(202).json({ accepted: true });
   });
 
+  /** Backs the panel's Stop button for a running auto-refinement. */
+  app.get("/bridge/refinement", authenticate, (_request, response) => {
+    response.json({ session: refinements.activeSession() ?? null });
+  });
+
+  app.post("/bridge/refinement/stop", authenticate, (_request, response) => {
+    const active = refinements.activeSession();
+    if (active === undefined) {
+      response.status(404).json({ error: "No refinement run is active." });
+      return;
+    }
+    response.json(refinements.stop(active.sessionId, "stopped-by-user"));
+  });
+
   app.post("/bridge/view-captures", authenticate, (request, response) => {
     const parsed = multiViewCaptureSchema.safeParse(request.body);
     if (!parsed.success) {
@@ -508,6 +524,7 @@ export function createStudioApp(
       destinations,
       undefined,
       viewCaptures,
+      refinements,
     );
     const transport = new StreamableHTTPServerTransport({
       sessionIdGenerator: undefined,
