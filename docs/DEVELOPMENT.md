@@ -158,6 +158,48 @@ Tools: `get_texture_destination`, `set_texture_destination`, `save_image_variant
 
 Tools: `inspect_image_transparency`, `convert_image_to_pixel_art`, `import_image_variant`. Endpoints: `GET /bridge/image-variants/:id/transparency`, `POST /bridge/image-variants/:id/convert`, and `POST /bridge/image-variants/:id/import`.
 
+## Phase 6 multi-view capture
+
+`capture_views` asks Blockbench for one image per standard camera angle in a single tool call, instead of the single stale `capture_viewport` frame. The angles are `front`, `back`, `left`, `right`, `top`, `bottom`, and `isometric`; the default set is front, right, back, left, top, and isometric at 768x768.
+
+The round trip is a typed bridge command, not a new channel. The MCP tool queues a `capture_views` command carrying a `requestId`, then awaits that request in the server's `ViewCaptureStore`. The plugin picks the command up on its normal poll, drives the preview camera, and posts the finished set to `POST /bridge/view-captures`, which resolves the waiting tool call. A failed acknowledgement rejects the same waiter with the plugin's own message, and an unanswered request times out after 20 seconds rather than hanging the tool.
+
+Capturing is read-only by construction:
+
+- The camera position, orbit target, and projection mode are recorded before the sweep and restored in a `finally`, so a capture cannot leave the user looking somewhere else.
+- Axis views render orthographically and `isometric` renders in perspective, matching Blockbench's own presets.
+- The camera pulls back to `max(64, largest extent * 2.4)` so a large model still fits the frame at every angle.
+- No element, texture, or selection is touched, so nothing enters the Undo stack. `applyCommand` explicitly refuses `capture_views` — it belongs to `view-capture.ts`.
+
+Tools: `capture_views`. Endpoint: `POST /bridge/view-captures`.
+
+## Phase 6 bounded auto-refinement
+
+Automatic refinement is off until `begin_refinement` is called, and only one run can be active at a time. A run fixes its goal, its pass budget (1-4, default 3), an optional scope group, and the set of cubes that existed when it began. Everything after that is bounded by those choices.
+
+A pass is claimed with `refine_pass`, which captures the standard views at 768x768 or larger and returns them with the pass number and the passes remaining. Claiming a pass past the budget stops the run with `limit-reached` rather than quietly continuing, so a run always ends with a recorded reason: `satisfied`, `limit-reached`, `no-safe-correction`, or `stopped-by-user`.
+
+Corrections go through the normal draft tools, but reach Blockbench only via `commit_refinement_draft`, which re-checks them first (`check_refinement_draft` runs the same rules without committing). A correction is refused when it:
+
+- touches a cube that did not exist when the run began,
+- leaves the scope group,
+- would change a cube's size, or
+- is empty, or larger than 12 operations.
+
+The user's Stop button in the assistant panel calls `POST /bridge/refinement/stop`, which ends the active run as `stopped-by-user` before stopping the chat turn; every later tool call on that session is refused. `stop_refinement` and `get_refinement_report` return the resource report: passes used against the budget, corrections applied, images captured, elapsed time, and the stop reason.
+
+Tools: `begin_refinement`, `refine_pass`, `check_refinement_draft`, `commit_refinement_draft`, `stop_refinement`, `get_refinement_report`. Endpoints: `GET /bridge/refinement` and `POST /bridge/refinement/stop`.
+
+## Diagnostics and crash recovery
+
+Every MCP tool call is logged through one wrapper in `createMcpServer`: tool name, duration, success or failure, affected element UUIDs, and transaction ID. Arguments, prompts, and image bytes are never stored, and failure messages pass through `redactDiagnosticText`, which strips bearer tokens, API keys, long secrets, and the user's home directory. The log is a bounded ring buffer in memory.
+
+`GET /bridge/diagnostics` returns the diagnostics page payload: plugin and MCP server versions, the connection URL (never the token), Blockbench connection state, the active project and format, granted permissions, image provider status, open drafts and unacknowledged commands, recent tool calls, and recent errors. It is safe to copy verbatim into a bug report. `POST /bridge/diagnostics/self-test` checks the token, the bridge connection, the published project, the command queue, an available image backend, and the recent error history, and reports each check with a plain-language detail.
+
+Crash recovery is a journal, not a replay. `CrashJournal` mirrors uncommitted drafts and unacknowledged bridge commands to `%APPDATA%/BlockbenchCodexStudio/pending-work.json` (override with `BLOCKBENCH_CODEX_STATE_DIR`) on every `DraftStore` change, writing atomically through a temporary file. A clean shutdown deletes the journal, so finding one at startup means the previous run died. The recovered work is only ever described back to the user through `GET /bridge/recovery` and the diagnostics report; nothing is re-applied to the model automatically. Entries older than 24 hours are discarded and counted. `POST /bridge/recovery/dismiss` clears the report once the user has seen it.
+
+Tools: `get_diagnostics`, `run_self_test`. Endpoints: `GET /bridge/diagnostics`, `POST /bridge/diagnostics/self-test`, `GET /bridge/recovery`, `POST /bridge/recovery/dismiss`.
+
 ## Workspace map
 
 - `apps/blockbench-plugin`: in-process Blockbench adapter and UI

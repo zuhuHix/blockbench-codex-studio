@@ -4,6 +4,10 @@ import { serializeFace } from "./snapshot.js";
 export function applyCommand(command: BridgeCommand): void {
   if ((Project?.uuid ?? Project?.name) !== command.projectId)
     throw new Error("Command targets a different Blockbench project.");
+  if ("action" in command && command.action === "capture_views")
+    throw new Error(
+      "Multi-view capture is handled by the view capture module, not the applier.",
+    );
   if ("action" in command && command.action === "undo") {
     Undo.undo();
     return;

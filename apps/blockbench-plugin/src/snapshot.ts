@@ -61,6 +61,9 @@ function serializeFaces(cube: BlockbenchNode) {
   );
 }
 
+/** Kept in line with the plugin manifest version in `index.ts`. */
+export const pluginVersion = "0.2.0";
+
 export function captureSnapshot(viewport?: ViewportSnapshot) {
   if (Project === undefined) return undefined;
   return {
@@ -108,6 +111,10 @@ export function captureSnapshot(viewport?: ViewportSnapshot) {
           : { faces: serializeFaces(cube) }),
       })),
     ...(viewport === undefined ? {} : { viewport }),
+    pluginVersion,
+    ...(typeof Blockbench.version === "string" && Blockbench.version !== ""
+      ? { blockbenchVersion: Blockbench.version }
+      : {}),
     capturedAt: new Date().toISOString(),
   };
 }

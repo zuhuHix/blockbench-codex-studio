@@ -1,5 +1,6 @@
 import { z } from "zod";
 
+import { viewAngleSchema } from "./bridge.js";
 import {
   bounds3Schema,
   cubeFaceNameSchema,
@@ -70,11 +71,21 @@ export const importTextureCommandSchema = z.object({
   applyElementIds: z.array(elementIdSchema),
 });
 
+export const captureViewsCommandSchema = z.object({
+  commandId: z.string().uuid(),
+  projectId: z.string().min(1),
+  action: z.literal("capture_views"),
+  requestId: z.string().uuid(),
+  angles: z.array(viewAngleSchema).min(1).max(7),
+  size: z.number().int().min(64).max(2048),
+});
+
 export const bridgeCommandSchema = z.union([
   applyDraftCommandSchema,
   setSelectionCommandSchema,
   undoCommandSchema,
   importTextureCommandSchema,
+  captureViewsCommandSchema,
 ]);
 
 export const commandAcknowledgementSchema = z.object({
@@ -92,6 +103,7 @@ export type ApplyDraftCommand = z.infer<typeof applyDraftCommandSchema>;
 export type SetSelectionCommand = z.infer<typeof setSelectionCommandSchema>;
 export type UndoCommand = z.infer<typeof undoCommandSchema>;
 export type ImportTextureCommand = z.infer<typeof importTextureCommandSchema>;
+export type CaptureViewsCommand = z.infer<typeof captureViewsCommandSchema>;
 export type BridgeCommand = z.infer<typeof bridgeCommandSchema>;
 export type CommandAcknowledgement = z.infer<
   typeof commandAcknowledgementSchema

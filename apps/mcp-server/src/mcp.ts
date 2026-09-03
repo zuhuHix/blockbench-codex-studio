@@ -1,5 +1,9 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import type { BlockbenchSnapshot } from "@blockbench-codex/contracts";
+import type {
+  BlockbenchSnapshot,
+  MultiViewCapture,
+  ViewAngle,
+} from "@blockbench-codex/contracts";
 
 import type { SnapshotStore } from "./snapshot-store.js";
 import type { DraftStore } from "./draft-store.js";
@@ -18,6 +22,14 @@ import {
 import { VariantStore } from "./variant-store.js";
 import { TextureDestinationStore } from "./texture-destinations.js";
 import { convertToPixelArt, inspectImageAlpha } from "./image-conversion.js";
+import { ViewCaptureStore } from "./view-capture-store.js";
+import { RefinementStore } from "./refinement-store.js";
+import { DiagnosticsStore } from "./diagnostics-store.js";
+import {
+  buildDiagnosticsReport,
+  runSelfTest,
+  type DiagnosticsDependencies,
+} from "./diagnostics.js";
 import {
   bounds3Schema,
   cubeFaceNameSchema,
@@ -29,7 +41,10 @@ import {
   imageReferenceSourceSchema,
   imageSizeSchema,
   pixelArtConversionSchema,
+  refinementSessionIdSchema,
+  refinementStopReasonSchema,
   transactionIdSchema,
+  viewAngleSchema,
 } from "@blockbench-codex/contracts";
 import { z } from "zod";
 import {
@@ -66,6 +81,43 @@ const draftAnnotations = {
   openWorldHint: false,
 } as const;
 
+/** At least 768x768 and several standard views, per the refinement rules. */
+const defaultAngles: readonly ViewAngle[] = [
+  "front",
+  "right",
+  "back",
+  "left",
+  "top",
+  "isometric",
+];
+
+function viewContent(
+  capture: MultiViewCapture,
+  detail: Record<string, unknown>,
+) {
+  return {
+    content: [
+      ...capture.views.map((view) => ({
+        type: "image" as const,
+        data: view.dataBase64,
+        mimeType: view.mimeType,
+      })),
+      {
+        type: "text" as const,
+        text: JSON.stringify({
+          ...detail,
+          capturedAt: capture.capturedAt,
+          views: capture.views.map((view) => ({
+            angle: view.angle,
+            width: view.width,
+            height: view.height,
+          })),
+        }),
+      },
+    ],
+  };
+}
+
 function jsonContent(value: unknown) {
   return {
     content: [{ type: "text" as const, text: JSON.stringify(value, null, 2) }],
@@ -101,11 +153,67 @@ export function createMcpServer(
   variants = new VariantStore(),
   destinations = new TextureDestinationStore(),
   imageDispatch: ImageDispatchDependencies = defaultImageDispatchDependencies,
+  viewCaptures = new ViewCaptureStore(),
+  refinements = new RefinementStore(),
+  diagnostics = new DiagnosticsStore(),
+  diagnosticsDependencies?: () => DiagnosticsDependencies,
 ): McpServer {
   const server = new McpServer({
     name: "blockbench-codex-studio",
     version: "0.1.0",
   });
+
+  // Every tool below is logged the same way, so the wrapper lives here rather
+  // than in forty-odd call sites. Only the name, duration, outcome, affected
+  // UUIDs, and transaction are kept — never arguments, prompts, or images.
+  const registerTool = server.registerTool.bind(server);
+  server.registerTool = ((name: string, config: never, handler: never) =>
+    registerTool(name, config, ((...handlerArguments: unknown[]) => {
+      const startedAtMilliseconds = Date.now();
+      const input = (handlerArguments[0] ?? {}) as Record<string, unknown>;
+      const elementIds = Array.isArray(input.elementIds)
+        ? input.elementIds.filter(
+            (value): value is string => typeof value === "string",
+          )
+        : typeof input.elementId === "string"
+          ? [input.elementId]
+          : [];
+      const finish = (success: boolean, error?: string) =>
+        diagnostics.record({
+          toolName: name,
+          startedAtMilliseconds,
+          durationMilliseconds: Date.now() - startedAtMilliseconds,
+          success,
+          ...(error === undefined ? {} : { error }),
+          affectedElementIds: elementIds,
+          ...(typeof input.transactionId === "string"
+            ? { transactionId: input.transactionId }
+            : {}),
+        });
+      const describe = (error: unknown) =>
+        error instanceof Error ? error.message : "Tool call failed.";
+      try {
+        const result = (handler as (...args: unknown[]) => unknown)(
+          ...handlerArguments,
+        );
+        if (result instanceof Promise)
+          return (result as Promise<unknown>).then(
+            (value: unknown) => {
+              finish(true);
+              return value;
+            },
+            (error: unknown) => {
+              finish(false, describe(error));
+              throw error;
+            },
+          );
+        finish(true);
+        return result;
+      } catch (error) {
+        finish(false, describe(error));
+        throw error;
+      }
+    }) as never)) as typeof server.registerTool;
 
   server.registerTool(
     "health",
@@ -211,6 +319,34 @@ export function createMcpServer(
         ],
       };
     },
+  );
+
+  /** Queues one capture_views command and awaits the plugin's answer. */
+  const requestViews = (
+    angles: readonly ViewAngle[] | undefined,
+    size: number | undefined,
+  ) =>
+    viewCaptures.wait(
+      drafts.captureViews(
+        requireSnapshot(store),
+        angles ?? defaultAngles,
+        size ?? 768,
+      ).requestId,
+    );
+
+  server.registerTool(
+    "capture_views",
+    {
+      description:
+        "Drive the Blockbench camera through standard angles and return one image per angle. The camera is restored afterwards and the model is never modified.",
+      annotations: readOnlyAnnotations,
+      inputSchema: {
+        angles: z.array(viewAngleSchema).min(1).max(7).optional(),
+        size: z.number().int().min(64).max(2048).optional(),
+      },
+    },
+    async ({ angles, size }) =>
+      viewContent(await requestViews(angles, size), {}),
   );
 
   server.registerTool(
@@ -955,6 +1091,161 @@ export function createMcpServer(
           applyElementIds: targets,
         }),
       });
+    },
+  );
+
+  server.registerTool(
+    "begin_refinement",
+    {
+      description:
+        "Begin a bounded automatic refinement run against a stated goal. Refinement is off until this is called, and every run reports why it stopped.",
+      annotations: draftAnnotations,
+      inputSchema: {
+        goal: z.string().min(1).max(500),
+        maxPasses: z.number().int().min(1).max(4).optional(),
+        scopeGroupId: z.string().min(1).optional(),
+      },
+    },
+    ({ goal, maxPasses, scopeGroupId }) =>
+      jsonContent(
+        refinements.begin(
+          requireSnapshot(store),
+          goal,
+          maxPasses ?? 3,
+          scopeGroupId,
+        ),
+      ),
+  );
+
+  server.registerTool(
+    "refine_pass",
+    {
+      description:
+        "Claim the next refinement pass and capture the standard views to compare against the goal. Fails once the pass budget is spent.",
+      annotations: readOnlyAnnotations,
+      inputSchema: {
+        sessionId: refinementSessionIdSchema,
+        note: z.string().min(1).max(500).optional(),
+        angles: z.array(viewAngleSchema).min(1).max(7).optional(),
+        size: z.number().int().min(768).max(2048).optional(),
+      },
+    },
+    async ({ sessionId, note, angles, size }) => {
+      const pass = refinements.beginPass(
+        sessionId,
+        angles ?? defaultAngles,
+        note,
+      );
+      return viewContent(await requestViews(angles, size), {
+        pass: pass.pass,
+        remainingPasses: pass.remainingPasses,
+      });
+    },
+  );
+
+  server.registerTool(
+    "check_refinement_draft",
+    {
+      description:
+        "Check a draft against the automatic-pass rules: inside the scope group, on cubes that already existed, size-preserving, and minimal.",
+      annotations: readOnlyAnnotations,
+      inputSchema: {
+        sessionId: refinementSessionIdSchema,
+        transactionId: transactionIdSchema,
+      },
+    },
+    ({ sessionId, transactionId }) =>
+      jsonContent(
+        refinements.checkDraft(
+          sessionId,
+          drafts.get(transactionId),
+          requireSnapshot(store),
+        ),
+      ),
+  );
+
+  server.registerTool(
+    "commit_refinement_draft",
+    {
+      description:
+        "Commit a correction as part of a refinement run. Rejected unless it satisfies every automatic-pass rule.",
+      annotations: draftAnnotations,
+      inputSchema: {
+        sessionId: refinementSessionIdSchema,
+        transactionId: transactionIdSchema,
+      },
+    },
+    ({ sessionId, transactionId }) => {
+      const snapshot = requireSnapshot(store);
+      const check = refinements.checkDraft(
+        sessionId,
+        drafts.get(transactionId),
+        snapshot,
+      );
+      if (!check.allowed)
+        throw new Error(
+          `This correction is not allowed in an automatic pass: ${check.violations.join(" ")}`,
+        );
+      const command = drafts.commit(snapshot, transactionId);
+      return jsonContent({
+        command,
+        session: refinements.recordCorrection(sessionId),
+      });
+    },
+  );
+
+  server.registerTool(
+    "stop_refinement",
+    {
+      description:
+        "End a refinement run and report the passes used, corrections applied, images captured, and the reason for stopping.",
+      annotations: draftAnnotations,
+      inputSchema: {
+        sessionId: refinementSessionIdSchema,
+        reason: refinementStopReasonSchema,
+      },
+    },
+    ({ sessionId, reason }) => jsonContent(refinements.stop(sessionId, reason)),
+  );
+
+  server.registerTool(
+    "get_refinement_report",
+    {
+      description:
+        "Report the current resource usage of a refinement run without ending it.",
+      annotations: readOnlyAnnotations,
+      inputSchema: { sessionId: refinementSessionIdSchema },
+    },
+    ({ sessionId }) => jsonContent(refinements.report(sessionId)),
+  );
+
+  server.registerTool(
+    "get_diagnostics",
+    {
+      description:
+        "Report versions, connection, permissions, image providers, recent tool errors, and recovered work. Contains no secrets.",
+      annotations: probeAnnotations,
+    },
+    async () => {
+      if (diagnosticsDependencies === undefined)
+        throw new Error("Diagnostics are only available on the live server.");
+      return jsonContent(
+        await buildDiagnosticsReport(diagnosticsDependencies()),
+      );
+    },
+  );
+
+  server.registerTool(
+    "run_self_test",
+    {
+      description:
+        "Check the bridge connection, published project, command queue, image backend, and recent errors.",
+      annotations: probeAnnotations,
+    },
+    async () => {
+      if (diagnosticsDependencies === undefined)
+        throw new Error("The self-test is only available on the live server.");
+      return jsonContent(await runSelfTest(diagnosticsDependencies()));
     },
   );
 

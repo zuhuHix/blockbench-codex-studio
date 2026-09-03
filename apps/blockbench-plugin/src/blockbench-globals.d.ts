@@ -58,6 +58,7 @@ declare const MenuBar: {
   };
 };
 declare const Blockbench: {
+  readonly version?: string;
   showQuickMessage(message: string, duration?: number): void;
   addCSS(css: string): { delete(): void };
   pickDirectory?(options: {
@@ -123,13 +124,33 @@ declare const Outliner: {
   readonly selected: BlockbenchNode[];
 };
 declare function updateSelection(): void;
-declare const Preview: {
-  readonly selected?: {
-    screenshot(
-      options: { width: number; height: number },
-      callback: (dataUrl: string) => void,
-    ): void;
+interface BlockbenchVector3 {
+  x: number;
+  y: number;
+  z: number;
+  set(x: number, y: number, z: number): unknown;
+}
+interface BlockbenchPreview {
+  screenshot(
+    options: { width: number; height: number },
+    callback: (dataUrl: string) => void,
+  ): void;
+  readonly camera?: {
+    readonly position: BlockbenchVector3;
+    lookAt?(target: BlockbenchVector3): void;
+    updateProjectionMatrix?(): void;
   };
+  readonly controls?: {
+    readonly target: BlockbenchVector3;
+    update?(): void;
+  };
+  readonly isOrtho?: boolean;
+  setProjectionMode?(orthographic: boolean, from_preset?: boolean): unknown;
+  loadAnglePreset?(preset: Record<string, unknown>): unknown;
+  render?(): unknown;
+}
+declare const Preview: {
+  readonly selected?: BlockbenchPreview;
 };
 declare const localStorage: {
   getItem(key: string): string | null;

@@ -6,6 +6,7 @@ import {
   publishSnapshot,
   sendChatMessage,
   stopChat,
+  stopRefinement,
   type BridgeSettings,
   type ChatEvent,
 } from "./bridge-client.js";
@@ -265,7 +266,9 @@ export function createAssistantPanel(
         },
         async stop() {
           const bridge = settings();
-          if (bridge && this.sessionId) await stopChat(bridge, this.sessionId);
+          if (!bridge) return;
+          await stopRefinement(bridge);
+          if (this.sessionId) await stopChat(bridge, this.sessionId);
         },
         undo() {
           Undo.undo();

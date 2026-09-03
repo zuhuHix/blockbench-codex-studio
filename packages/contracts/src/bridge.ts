@@ -31,6 +31,29 @@ export const viewportCaptureSchema = z.object({
   capturedAt: z.iso.datetime(),
 });
 
+/** The standard camera angles the plugin can drive for multi-view capture. */
+export const viewAngleSchema = z.enum([
+  "front",
+  "back",
+  "left",
+  "right",
+  "top",
+  "bottom",
+  "isometric",
+]);
+
+export const viewCaptureSchema = viewportCaptureSchema.extend({
+  angle: viewAngleSchema,
+});
+
+/** One completed multi-view capture, answering a single capture_views command. */
+export const multiViewCaptureSchema = z.object({
+  requestId: z.string().uuid(),
+  projectId: z.string().min(1),
+  views: z.array(viewCaptureSchema).min(1),
+  capturedAt: z.iso.datetime(),
+});
+
 export const blockbenchSnapshotSchema = z.object({
   bridgeVersion: z.literal(1),
   project: z.object({
@@ -48,8 +71,14 @@ export const blockbenchSnapshotSchema = z.object({
   outline: z.array(outlineNodeSchema),
   elements: z.array(cubeElementSchema),
   viewport: viewportCaptureSchema.optional(),
+  /** Reported on the diagnostics page so installed versions stay distinguishable. */
+  pluginVersion: z.string().min(1).optional(),
+  blockbenchVersion: z.string().min(1).optional(),
   capturedAt: z.iso.datetime(),
 });
 
 export type BlockbenchSnapshot = z.infer<typeof blockbenchSnapshotSchema>;
 export type ViewportCapture = z.infer<typeof viewportCaptureSchema>;
+export type ViewAngle = z.infer<typeof viewAngleSchema>;
+export type ViewCapture = z.infer<typeof viewCaptureSchema>;
+export type MultiViewCapture = z.infer<typeof multiViewCaptureSchema>;

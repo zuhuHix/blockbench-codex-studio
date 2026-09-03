@@ -4,6 +4,7 @@ import { createMcpExpressApp } from "@modelcontextprotocol/sdk/server/express.js
 import {
   blockbenchSnapshotSchema,
   commandAcknowledgementSchema,
+  multiViewCaptureSchema,
   imageReferenceRoleSchema,
   pixelArtConversionSchema,
 } from "@blockbench-codex/contracts";
@@ -24,7 +25,12 @@ import { ReferenceStore } from "./reference-store.js";
 import { VariantStore } from "./variant-store.js";
 import { TextureDestinationStore } from "./texture-destinations.js";
 import { revealInFileManager } from "./reveal.js";
+import { ViewCaptureStore } from "./view-capture-store.js";
+import { RefinementStore } from "./refinement-store.js";
 import { convertToPixelArt, inspectImageAlpha } from "./image-conversion.js";
+import { CrashJournal } from "./crash-recovery.js";
+import { DiagnosticsStore } from "./diagnostics-store.js";
+import { buildDiagnosticsReport, runSelfTest } from "./diagnostics.js";
 
 const chatMessageSchema = z.object({
   prompt: z.string(),
@@ -38,6 +44,7 @@ export interface StudioServerOptions {
   readonly port?: number;
   readonly store?: SnapshotStore;
   readonly imageProbes?: ImageProviderProbes;
+  readonly journal?: CrashJournal;
 }
 
 export interface RunningStudioServer {
@@ -54,14 +61,46 @@ export function createStudioApp(
   store = new SnapshotStore(),
   port = 48172,
   imageProbes: ImageProviderProbes = defaultImageProviderProbes,
+  journal = new CrashJournal(),
 ): Express {
   const app = createMcpExpressApp({ host: "127.0.0.1" });
   const authenticate = createBearerAuth(token);
-  const drafts = new DraftStore();
+  const diagnostics = new DiagnosticsStore();
+  // Read before anything can overwrite it: a journal left on disk means the
+  // previous run never shut down cleanly.
+  let recovery = journal.loadPreviousRun();
+  const drafts = new DraftStore((state) => {
+    try {
+      journal.record(state);
+    } catch (error) {
+      diagnostics.record({
+        toolName: "crash_journal",
+        startedAtMilliseconds: Date.now(),
+        durationMilliseconds: 0,
+        success: false,
+        error:
+          error instanceof Error
+            ? error.message
+            : "Could not write the crash journal.",
+      });
+    }
+  });
+  const diagnosticsDependencies = () => ({
+    store,
+    drafts,
+    log: diagnostics,
+    imageProbes,
+    host: "127.0.0.1",
+    port,
+    tokenConfigured: token.length > 0,
+    ...(recovery.unclean ? { recovery } : {}),
+  });
   const chats = new ChatManager();
   const references = new ReferenceStore();
   const variants = new VariantStore();
   const destinations = new TextureDestinationStore();
+  const viewCaptures = new ViewCaptureStore();
+  const refinements = new RefinementStore();
 
   app.post("/bridge/chat/sessions", authenticate, (_request, response) => {
     response.status(201).json({ sessionId: chats.create() });
@@ -455,6 +494,33 @@ export function createStudioApp(
     response.status(202).json({ accepted: true });
   });
 
+  /** Backs the panel's Stop button for a running auto-refinement. */
+  app.get("/bridge/refinement", authenticate, (_request, response) => {
+    response.json({ session: refinements.activeSession() ?? null });
+  });
+
+  app.post("/bridge/refinement/stop", authenticate, (_request, response) => {
+    const active = refinements.activeSession();
+    if (active === undefined) {
+      response.status(404).json({ error: "No refinement run is active." });
+      return;
+    }
+    response.json(refinements.stop(active.sessionId, "stopped-by-user"));
+  });
+
+  app.post("/bridge/view-captures", authenticate, (request, response) => {
+    const parsed = multiViewCaptureSchema.safeParse(request.body);
+    if (!parsed.success) {
+      response.status(400).json({
+        error: "Invalid multi-view capture.",
+        issues: parsed.error.issues,
+      });
+      return;
+    }
+    viewCaptures.complete(parsed.data);
+    response.status(202).json({ accepted: true });
+  });
+
   app.get("/bridge/commands", authenticate, (_request, response) => {
     response.json({ commands: drafts.pending() });
   });
@@ -465,8 +531,64 @@ export function createStudioApp(
       response.status(400).json({ error: "Invalid command acknowledgement." });
       return;
     }
+    const command = drafts
+      .pending()
+      .find((pending) => pending.commandId === parsed.data.commandId);
+    if (
+      !parsed.data.success &&
+      command !== undefined &&
+      "action" in command &&
+      command.action === "capture_views"
+    )
+      viewCaptures.fail(
+        command.requestId,
+        parsed.data.error ?? "Blockbench could not capture the views.",
+      );
     drafts.acknowledge(parsed.data.commandId);
     response.status(202).json({ accepted: true });
+  });
+
+  app.get("/bridge/diagnostics", authenticate, (_request, response) => {
+    void buildDiagnosticsReport(diagnosticsDependencies()).then(
+      (report) => response.json(report),
+      (error: unknown) =>
+        response.status(500).json({
+          error:
+            error instanceof Error
+              ? error.message
+              : "Diagnostics could not be collected.",
+        }),
+    );
+  });
+
+  app.post(
+    "/bridge/diagnostics/self-test",
+    authenticate,
+    (_request, response) => {
+      void runSelfTest(diagnosticsDependencies()).then(
+        (report) => response.json(report),
+        (error: unknown) =>
+          response.status(500).json({
+            error:
+              error instanceof Error
+                ? error.message
+                : "Self-test failed to run.",
+          }),
+      );
+    },
+  );
+
+  app.get("/bridge/recovery", authenticate, (_request, response) => {
+    response.json(recovery);
+  });
+
+  // Recovered work is never replayed automatically; dismissing it only clears
+  // the report so the panel stops warning about the previous run.
+  app.post("/bridge/recovery/dismiss", authenticate, (_request, response) => {
+    if (drafts.openDrafts().length === 0 && drafts.pending().length === 0)
+      journal.clear();
+    recovery = { ...recovery, unclean: false, drafts: [], commands: [] };
+    response.json(recovery);
   });
 
   app.post("/mcp", authenticate, async (request, response) => {
@@ -477,6 +599,11 @@ export function createStudioApp(
       references,
       variants,
       destinations,
+      undefined,
+      viewCaptures,
+      refinements,
+      diagnostics,
+      () => diagnosticsDependencies(),
     );
     const transport = new StreamableHTTPServerTransport({
       sessionIdGenerator: undefined,
@@ -520,11 +647,13 @@ export async function startStudioServer(
 ): Promise<RunningStudioServer> {
   const host = options.host ?? "127.0.0.1";
   const store = options.store ?? new SnapshotStore();
+  const journal = options.journal ?? new CrashJournal();
   const app = createStudioApp(
     options.token,
     store,
     options.port ?? 48172,
     options.imageProbes ?? defaultImageProviderProbes,
+    journal,
   );
   const httpServer = await new Promise<Server>((resolve, reject) => {
     const listeningServer = app.listen(options.port ?? 48172, host, () =>
@@ -545,6 +674,9 @@ export async function startStudioServer(
     store,
     close: () =>
       new Promise<void>((resolve, reject) => {
+        // A clean shutdown removes the journal, so the next start knows the
+        // difference between "stopped" and "crashed".
+        journal.clear();
         httpServer.close((error) =>
           error === undefined ? resolve() : reject(error),
         );
