@@ -156,6 +156,12 @@ export class RefinementStore {
       );
     const baseline = new Set(session.baselineElementIds);
     for (const operation of draft.operations) {
+      if (operation.kind !== "move_cube" && operation.kind !== "set_face_uv") {
+        violations.push(
+          "Automatic refinement may only move cubes and remap UVs, not add, delete, resize, or rename them.",
+        );
+        continue;
+      }
       if (!baseline.has(operation.elementId))
         violations.push(
           `Cube ${operation.elementId} did not exist when refinement began.`,

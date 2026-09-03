@@ -46,6 +46,14 @@ import {
   transactionIdSchema,
   viewAngleSchema,
 } from "@blockbench-codex/contracts";
+import {
+  decodeTexture,
+  encodeTexture,
+  paintStrokes,
+  previewRegion,
+  readRegion,
+  type PaintStroke,
+} from "./texture-painting.js";
 import { z } from "zod";
 import {
   inspectConnectivity,
@@ -54,6 +62,9 @@ import {
 import {
   auditUvSeams,
   cubeFaceNames,
+  describeCubeLayout,
+  describeFaceLayout,
+  findFaceOverlaps,
   measureUvCoverage,
   normalizeFaceTexelDensity,
   packFaces,
@@ -145,6 +156,70 @@ function requireTextureSize(snapshot: BlockbenchSnapshot) {
   return snapshot.project.textureSize;
 }
 
+const colorSchema = z
+  .string()
+  .regex(
+    /^(#[0-9a-fA-F]{3,8}|transparent)$/,
+    "Use #rgb, #rgba, #rrggbb, #rrggbbaa, or transparent.",
+  );
+
+/** A rectangle in texture pixels, ordered [left, top, right, bottom]. */
+const rectSchema = z.tuple([z.number(), z.number(), z.number(), z.number()]);
+
+function requireCube(snapshot: BlockbenchSnapshot, elementId: string) {
+  const cube = snapshot.elements.find((element) => element.id === elementId);
+  if (cube === undefined) throw new Error("Cube element was not found.");
+  return cube;
+}
+
+/**
+ * Resolves a paint target to one texture and one rectangle. Naming a cube face
+ * is the UV-aware path: the rectangle comes from the face's own mapping, so a
+ * stroke lands exactly where that face shows it.
+ */
+function resolvePaintTarget(
+  snapshot: BlockbenchSnapshot,
+  target: {
+    readonly textureId?: string;
+    readonly elementId?: string;
+    readonly face?: (typeof cubeFaceNames)[number];
+    readonly rect?: readonly [number, number, number, number];
+  },
+) {
+  let rect = target.rect;
+  let textureId = target.textureId;
+  if (target.elementId !== undefined || target.face !== undefined) {
+    if (target.elementId === undefined || target.face === undefined)
+      throw new Error("Targeting a face needs both elementId and face.");
+    const layout = describeFaceLayout(
+      requireCube(snapshot, target.elementId),
+      target.face,
+      requireTextureSize(snapshot),
+    );
+    rect ??= layout.rect;
+    textureId ??= layout.textureId ?? undefined;
+  }
+  if (rect === undefined)
+    throw new Error("Provide either a rect or an elementId and face.");
+  if (textureId === undefined) {
+    if (snapshot.textures.length !== 1)
+      throw new Error(
+        "The project has no single obvious texture; pass textureId.",
+      );
+    textureId = snapshot.textures[0]!.id;
+  }
+  const texture = snapshot.textures.find(
+    (candidate) => candidate.id === textureId,
+  );
+  if (texture === undefined)
+    throw new Error(`Texture ${textureId} is not in the project.`);
+  if (texture.dataBase64 === undefined)
+    throw new Error(
+      `Blockbench did not publish pixels for texture ${texture.name}; it may be too large to paint through the bridge.`,
+    );
+  return { texture, rect, dataBase64: texture.dataBase64 };
+}
+
 export function createMcpServer(
   store: SnapshotStore,
   drafts: DraftStore,
@@ -165,7 +240,7 @@ export function createMcpServer(
 
   // Every tool below is logged the same way, so the wrapper lives here rather
   // than in forty-odd call sites. Only the name, duration, outcome, affected
-  // UUIDs, and transaction are kept — never arguments, prompts, or images.
+  // UUIDs, and transaction are kept ï¿½ never arguments, prompts, or images.
   const registerTool = server.registerTool.bind(server);
   server.registerTool = ((name: string, config: never, handler: never) =>
     registerTool(name, config, ((...handlerArguments: unknown[]) => {
@@ -441,6 +516,106 @@ export function createMcpServer(
   );
 
   server.registerTool(
+    "create_group",
+    {
+      description:
+        "Stage a new outliner group (bone) so new cubes have somewhere structured to live.",
+      annotations: draftAnnotations,
+      inputSchema: {
+        transactionId: transactionIdSchema,
+        name: z.string().min(1).max(80),
+        parentGroupId: z.string().min(1).default("root"),
+        origin: z.tuple([z.number(), z.number(), z.number()]).optional(),
+      },
+    },
+    ({ transactionId, name, parentGroupId, origin }) =>
+      jsonContent(
+        drafts.createGroup(requireSnapshot(store), transactionId, {
+          name,
+          parentGroupId,
+          ...(origin === undefined ? {} : { origin }),
+        }),
+      ),
+  );
+
+  server.registerTool(
+    "create_cube",
+    {
+      description:
+        "Stage a new cube in a group. Returns the element ID the cube will get, so later operations in the same draft can already target it.",
+      annotations: draftAnnotations,
+      inputSchema: {
+        transactionId: transactionIdSchema,
+        name: z.string().min(1).max(80),
+        parentGroupId: z.string().min(1),
+        bounds: bounds3Schema,
+        rotation: z.tuple([z.number(), z.number(), z.number()]).optional(),
+      },
+    },
+    ({ transactionId, name, parentGroupId, bounds, rotation }) =>
+      jsonContent(
+        drafts.createCube(requireSnapshot(store), transactionId, {
+          name,
+          parentGroupId,
+          bounds,
+          ...(rotation === undefined ? {} : { rotation }),
+        }),
+      ),
+  );
+
+  server.registerTool(
+    "resize_cube",
+    {
+      description:
+        "Stage new bounds for a cube, changing its dimensions as well as its position.",
+      annotations: draftAnnotations,
+      inputSchema: {
+        transactionId: transactionIdSchema,
+        elementId: z.string().min(1),
+        to: bounds3Schema,
+      },
+    },
+    ({ transactionId, elementId, to }) =>
+      jsonContent(
+        drafts.resize(requireSnapshot(store), transactionId, elementId, to),
+      ),
+  );
+
+  server.registerTool(
+    "rename_cube",
+    {
+      description: "Stage a new name for a cube.",
+      annotations: draftAnnotations,
+      inputSchema: {
+        transactionId: transactionIdSchema,
+        elementId: z.string().min(1),
+        name: z.string().min(1).max(80),
+      },
+    },
+    ({ transactionId, elementId, name }) =>
+      jsonContent(
+        drafts.rename(requireSnapshot(store), transactionId, elementId, name),
+      ),
+  );
+
+  server.registerTool(
+    "delete_cube",
+    {
+      description:
+        "Stage the removal of a cube. Committing it stays one undoable Blockbench step.",
+      annotations: draftAnnotations,
+      inputSchema: {
+        transactionId: transactionIdSchema,
+        elementId: z.string().min(1),
+      },
+    },
+    ({ transactionId, elementId }) =>
+      jsonContent(
+        drafts.deleteCube(requireSnapshot(store), transactionId, elementId),
+      ),
+  );
+
+  server.registerTool(
     "connect_selected_chain",
     {
       description:
@@ -673,6 +848,150 @@ export function createMcpServer(
             );
         }
       return jsonContent(summary);
+    },
+  );
+
+  server.registerTool(
+    "list_textures",
+    {
+      description:
+        "List the project's textures with their size and whether their pixels are available to read and paint.",
+      annotations: readOnlyAnnotations,
+    },
+    () =>
+      jsonContent(
+        requireSnapshot(store).textures.map((texture) => ({
+          id: texture.id,
+          name: texture.name,
+          width: texture.width,
+          height: texture.height,
+          paintable: texture.dataBase64 !== undefined,
+        })),
+      ),
+  );
+
+  server.registerTool(
+    "describe_face_layout",
+    {
+      description:
+        "Explain, per cube face, which atlas rectangle it uses, which way its texture axes point in the world, its texel density, and which faces share pixels with it. Read this before painting.",
+      annotations: readOnlyAnnotations,
+      inputSchema: { elementIds: z.array(z.string().min(1)).optional() },
+    },
+    ({ elementIds }) => {
+      const snapshot = requireSnapshot(store);
+      const texture = requireTextureSize(snapshot);
+      const cubes =
+        elementIds === undefined
+          ? selectedCubes(snapshot)
+          : elementIds.map((elementId) => requireCube(snapshot, elementId));
+      if (cubes.length === 0)
+        throw new Error("Select cubes or pass elementIds to describe.");
+      const faces = cubes.flatMap((cube) => describeCubeLayout(cube, texture));
+      return jsonContent({
+        textureSize: texture,
+        faces,
+        sharedRegions: findFaceOverlaps(faces),
+      });
+    },
+  );
+
+  server.registerTool(
+    "read_texture_region",
+    {
+      description:
+        "Read the exact pixels of a texture region, by cube face or raw rectangle, as a hex grid plus a magnified preview image.",
+      annotations: readOnlyAnnotations,
+      inputSchema: {
+        textureId: z.string().min(1).optional(),
+        elementId: z.string().min(1).optional(),
+        face: cubeFaceNameSchema.optional(),
+        rect: rectSchema.optional(),
+      },
+    },
+    async ({ textureId, elementId, face, rect }) => {
+      const snapshot = requireSnapshot(store);
+      const target = resolvePaintTarget(snapshot, {
+        ...(textureId === undefined ? {} : { textureId }),
+        ...(elementId === undefined ? {} : { elementId }),
+        ...(face === undefined ? {} : { face }),
+        ...(rect === undefined ? {} : { rect }),
+      });
+      const image = await decodeTexture(
+        Buffer.from(target.dataBase64, "base64"),
+      );
+      const region = readRegion(image, target.rect);
+      const preview = await previewRegion(image, target.rect);
+      return {
+        content: [
+          {
+            type: "image" as const,
+            data: preview.dataBase64,
+            mimeType: "image/png" as const,
+          },
+          {
+            type: "text" as const,
+            text: JSON.stringify(
+              {
+                textureId: target.texture.id,
+                textureName: target.texture.name,
+                previewScale: preview.scale,
+                ...region,
+              },
+              null,
+              2,
+            ),
+          },
+        ],
+      };
+    },
+  );
+
+  server.registerTool(
+    "paint_texture_region",
+    {
+      description:
+        "Paint a texture region, targeted by cube face or raw rectangle, with a flat fill and/or a pixel grid (null keeps a pixel). Queues one undoable Blockbench repaint.",
+      annotations: draftAnnotations,
+      inputSchema: {
+        label: z.string().min(1).max(120).default("Paint texture"),
+        textureId: z.string().min(1).optional(),
+        elementId: z.string().min(1).optional(),
+        face: cubeFaceNameSchema.optional(),
+        rect: rectSchema.optional(),
+        fill: colorSchema.optional(),
+        pixels: z.array(z.array(colorSchema.nullable())).optional(),
+      },
+    },
+    async ({ label, textureId, elementId, face, rect, fill, pixels }) => {
+      const snapshot = requireSnapshot(store);
+      const target = resolvePaintTarget(snapshot, {
+        ...(textureId === undefined ? {} : { textureId }),
+        ...(elementId === undefined ? {} : { elementId }),
+        ...(face === undefined ? {} : { face }),
+        ...(rect === undefined ? {} : { rect }),
+      });
+      const stroke: PaintStroke = {
+        rect: target.rect,
+        ...(fill === undefined ? {} : { fill }),
+        ...(pixels === undefined ? {} : { pixels }),
+      };
+      const image = await decodeTexture(
+        Buffer.from(target.dataBase64, "base64"),
+      );
+      const painted = paintStrokes(image, [stroke]);
+      const encoded = await encodeTexture(painted.image);
+      return jsonContent({
+        queued: true,
+        changedPixels: painted.changedPixels,
+        command: drafts.paintTexture(snapshot, {
+          label,
+          textureId: target.texture.id,
+          width: painted.image.width,
+          height: painted.image.height,
+          dataBase64: encoded.toString("base64"),
+        }),
+      });
     },
   );
 

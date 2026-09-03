@@ -54,6 +54,19 @@ export const multiViewCaptureSchema = z.object({
   capturedAt: z.iso.datetime(),
 });
 
+/**
+ * A texture as the plugin publishes it. `dataBase64` holds the full PNG so the
+ * server can read and repaint real pixels; it is omitted for textures too large
+ * to ship on every snapshot.
+ */
+export const textureSnapshotSchema = z.object({
+  id: z.string().min(1),
+  name: z.string().min(1),
+  width: z.number().int().positive(),
+  height: z.number().int().positive(),
+  dataBase64: z.string().min(1).optional(),
+});
+
 export const blockbenchSnapshotSchema = z.object({
   bridgeVersion: z.literal(1),
   project: z.object({
@@ -70,6 +83,7 @@ export const blockbenchSnapshotSchema = z.object({
   selection: z.array(elementIdSchema),
   outline: z.array(outlineNodeSchema),
   elements: z.array(cubeElementSchema),
+  textures: z.array(textureSnapshotSchema).default([]),
   viewport: viewportCaptureSchema.optional(),
   /** Reported on the diagnostics page so installed versions stay distinguishable. */
   pluginVersion: z.string().min(1).optional(),
@@ -77,6 +91,7 @@ export const blockbenchSnapshotSchema = z.object({
   capturedAt: z.iso.datetime(),
 });
 
+export type TextureSnapshot = z.infer<typeof textureSnapshotSchema>;
 export type BlockbenchSnapshot = z.infer<typeof blockbenchSnapshotSchema>;
 export type ViewportCapture = z.infer<typeof viewportCaptureSchema>;
 export type ViewAngle = z.infer<typeof viewAngleSchema>;
