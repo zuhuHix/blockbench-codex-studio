@@ -190,6 +190,17 @@ The user's Stop button in the assistant panel calls `POST /bridge/refinement/sto
 
 Tools: `begin_refinement`, `refine_pass`, `check_refinement_draft`, `commit_refinement_draft`, `stop_refinement`, `get_refinement_report`. Endpoints: `GET /bridge/refinement` and `POST /bridge/refinement/stop`.
 
+## Phase 6 panel layout and accessibility
+
+The assistant panel now has exactly one scroll region and two pinned regions. The header and the run-status line share a sticky `bcs-topbar`, and the context chips, toolbar, and composer share a sticky `bcs-dock` at the bottom, so the status indicator and the Send/Stop/Undo controls stay reachable no matter how long the conversation grows. The timeline between them is the only scroller and uses `overscroll-behavior: contain`, so scrolling it never scrolls the panel behind it.
+
+Other polish in the same pass:
+
+- Assistant messages longer than 700 characters collapse to their first line with a `Show full message` toggle, expanded per message.
+- Every icon-only control carries an `aria-label` as well as a tooltip, the status line is an `aria-live` region, and `:focus-visible` draws an accent outline so keyboard navigation is visible throughout.
+- `Preview first`, the MCP-events disclosure, and the auto-refine settings are remembered in `localStorage` between sessions; Blockbench itself remembers the panel size and dock state.
+- An **Auto-refine** toggle with a 1-4 pass selector sits beside `Preview first`. It is off by default; when on, the outgoing prompt instructs the assistant to run the bounded refinement loop and report why it stopped. The panel's Stop button ends any active run as `stopped-by-user`.
+
 ## Workspace map
 
 - `apps/blockbench-plugin`: in-process Blockbench adapter and UI

@@ -15,6 +15,13 @@ import { captureSnapshot, captureViewport } from "./snapshot.js";
 const modelKey = "blockbench_codex_model";
 const providerKey = "blockbench_codex_provider";
 const effortKey = "blockbench_codex_effort";
+const previewKey = "blockbench_codex_preview_first";
+const detailsKey = "blockbench_codex_show_details";
+const refineKey = "blockbench_codex_auto_refine";
+const refinePassesKey = "blockbench_codex_refine_passes";
+
+/** Assistant messages longer than this collapse into an expandable section. */
+const longMessageLength = 700;
 
 type ProviderOption = {
   readonly id: string;
@@ -84,8 +91,11 @@ export function createAssistantPanel(
           lastEventId: 0,
           working: false,
           connected: false,
-          showDetails: false,
-          previewFirst: true,
+          showDetails: localStorage.getItem(detailsKey) === "1",
+          previewFirst: localStorage.getItem(previewKey) !== "0",
+          autoRefine: localStorage.getItem(refineKey) === "1",
+          refinePasses: Number(localStorage.getItem(refinePassesKey)) || 3,
+          expanded: {} as Record<number, boolean>,
           viewportAttached: false,
           poller: undefined as ReturnType<typeof setInterval> | undefined,
           reconnecting: false,
@@ -110,6 +120,20 @@ export function createAssistantPanel(
           return this.events.filter(
             (event: ChatEvent) => event.type === "tool",
           );
+        },
+      },
+      watch: {
+        previewFirst(value: boolean) {
+          localStorage.setItem(previewKey, value ? "1" : "0");
+        },
+        showDetails(value: boolean) {
+          localStorage.setItem(detailsKey, value ? "1" : "0");
+        },
+        autoRefine(value: boolean) {
+          localStorage.setItem(refineKey, value ? "1" : "0");
+        },
+        refinePasses(value: number) {
+          localStorage.setItem(refinePassesKey, String(value));
         },
       },
       async mounted() {
@@ -207,6 +231,9 @@ export function createAssistantPanel(
             this.previewFirst
               ? "PREVIEW MODE: inspect the live MCP selection and scene, then describe the exact proposed edit. Do not begin, commit, or apply a draft until the user explicitly approves in a later message."
               : "APPLY MODE: make safe changes only through typed Blockbench MCP draft tools, validate before commit, and summarize the committed result.",
+            this.autoRefine
+              ? `AUTO-REFINE: after applying a change, call begin_refinement with maxPasses ${this.refinePasses}, then use refine_pass to compare the captured views against the goal and commit_refinement_draft for minimal corrections. Always end with stop_refinement and report the passes used and why you stopped.`
+              : "",
             this.viewportAttached
               ? "A fresh viewport capture is published and available through capture_viewport."
               : "",
@@ -291,6 +318,18 @@ export function createAssistantPanel(
           }
         },
         configure,
+        isLong(text: string) {
+          return text.length > longMessageLength;
+        },
+        summarize(text: string) {
+          const firstLine = text.split("\n", 1)[0] ?? text;
+          return firstLine.length > 120
+            ? `${firstLine.slice(0, 120).trimEnd()}…`
+            : firstLine;
+        },
+        toggleExpanded(index: number) {
+          this.$set(this.expanded, index, !this.expanded[index]);
+        },
         eventLabel(event: ChatEvent) {
           const detail = event.detail as
             { item?: { type?: string; name?: string } } | undefined;
@@ -299,15 +338,15 @@ export function createAssistantPanel(
       },
       template: `
         <div class="bcs-shell">
-          <header class="bcs-header"><div class="bcs-brand"><span class="material-icons">smart_toy</span><div><strong>Codex Studio</strong><small>{{ projectName }}</small></div></div><div class="bcs-header-actions"><button title="New conversation" @click="newChat"><span class="material-icons">add_comment</span></button><button title="Connection settings" @click="configure"><span class="material-icons">settings</span></button></div></header>
-          <div class="bcs-status" :class="{offline:!connected}"><span></span>{{ connected ? (working ? 'Codex is working' : 'MCP connected') : 'Bridge offline' }}</div>
+          <div class="bcs-topbar"><header class="bcs-header" role="banner"><div class="bcs-brand"><span class="material-icons">smart_toy</span><div><strong>Codex Studio</strong><small>{{ projectName }}</small></div></div><div class="bcs-header-actions"><button title="New conversation" aria-label="New conversation" @click="newChat"><span class="material-icons">add_comment</span></button><button title="Connection settings" aria-label="Connection settings" @click="configure"><span class="material-icons">settings</span></button></div></header>
+          <div class="bcs-status" :class="{offline:!connected}" role="status" aria-live="polite"><span></span>{{ connected ? (working ? 'Codex is working' : 'MCP connected') : 'Bridge offline' }}</div></div>
           <main class="bcs-timeline">
             <div v-if="!messages.length" class="bcs-welcome"><span class="material-icons">auto_awesome</span><h3>Design directly in Blockbench</h3><p>Describe a change, attach the viewport, or select model parts. The assistant can inspect, draft, validate, and apply through the MCP bridge.</p><div><button @click="prompt='Inspect my selection and suggest improvements'">Inspect selection</button><button @click="prompt='Make these parts form a connected chain'">Connect selection</button><button @click="capture">Attach viewport</button></div></div>
-            <article v-for="(message,index) in messages" :key="index" class="bcs-message" :class="message.role"><div class="bcs-message-heading"><b>{{ message.role==='you'?'You':message.role==='error'?'Error':message.role==='status'?'System':provider.label }}</b><button v-if="message.role==='codex'" title="Copy message" @click="copyMessage(message.text)"><span class="material-icons">content_copy</span></button></div><p>{{ message.text }}</p></article>
+            <article v-for="(message,index) in messages" :key="index" class="bcs-message" :class="message.role"><div class="bcs-message-heading"><b>{{ message.role==='you'?'You':message.role==='error'?'Error':message.role==='status'?'System':provider.label }}</b><button v-if="message.role==='codex'" title="Copy message" aria-label="Copy message" @click="copyMessage(message.text)"><span class="material-icons">content_copy</span></button></div><p v-if="!isLong(message.text)">{{ message.text }}</p><div v-else class="bcs-long"><p>{{ expanded[index] ? message.text : summarize(message.text) }}</p><button @click="toggleExpanded(index)" :aria-expanded="expanded[index] ? 'true' : 'false'">{{ expanded[index] ? 'Show less' : 'Show full message' }}</button></div></article>
             <details v-if="toolEvents.length" class="bcs-events" :open="showDetails" @toggle="showDetails=$event.target.open"><summary><span class="material-icons">account_tree</span>{{ toolEvents.length }} MCP events</summary><div v-for="event in toolEvents" :key="event.id"><span>{{ eventLabel(event) }}</span><pre v-if="showDetails">{{ JSON.stringify(event.detail,null,2) }}</pre></div></details>
           </main>
-          <section class="bcs-context"><div class="bcs-chips"><span v-for="item in selection.slice(0,4)" :key="item.uuid" class="bcs-chip"><span class="material-icons">check_box</span>{{ item.name }}</span><span v-if="selection.length>4" class="bcs-chip">+{{ selection.length-4 }}</span><span v-if="viewportAttached" class="bcs-chip accent"><span class="material-icons">photo_camera</span>Viewport</span></div><div class="bcs-toolbar"><label><input type="checkbox" v-model="previewFirst"> Preview first</label><button class="bcs-provider" :disabled="working" @click="switchProvider" :title="'Using ' + provider.label + ' · click to switch to ' + otherProvider.label + ' (starts a new chat)'"><span class="material-icons">{{ provider.icon }}</span>{{ provider.label }}</button><select v-model="model" :disabled="working" :title="'Model · ' + provider.label"><option v-for="entry in provider.models" :key="entry.value" :value="entry.value">{{ entry.label }}</option></select><select v-model="effort" :disabled="working" title="Reasoning effort"><option v-for="level in provider.efforts" :key="level" :value="level">{{ level }}</option></select></div></section>
-          <footer class="bcs-composer"><textarea v-model="prompt" :disabled="working" @keydown.enter.exact.prevent="send" placeholder="Describe what to build or change…"></textarea><button class="bcs-attach" :class="{active:viewportAttached}" @click="toggleViewport" :disabled="working" :title="viewportAttached?'Remove attached viewport':'Attach current viewport'"><span class="material-icons">{{ viewportAttached ? 'close' : 'photo_camera' }}</span></button><button v-if="working" class="bcs-send stop" @click="stop" title="Stop"><span class="material-icons">stop</span></button><button v-else class="bcs-send" @click="send" :disabled="!prompt.trim()||!connected" title="Send"><span class="material-icons">arrow_upward</span></button><button class="bcs-undo" @click="undo"><span class="material-icons">undo</span> Undo</button></footer>
+          <div class="bcs-dock"><section class="bcs-context"><div class="bcs-chips"><span v-for="item in selection.slice(0,4)" :key="item.uuid" class="bcs-chip"><span class="material-icons">check_box</span>{{ item.name }}</span><span v-if="selection.length>4" class="bcs-chip">+{{ selection.length-4 }}</span><span v-if="viewportAttached" class="bcs-chip accent"><span class="material-icons">photo_camera</span>Viewport</span></div><div class="bcs-toolbar"><label title="Describe the edit before applying it"><input type="checkbox" v-model="previewFirst"> Preview first</label><label title="Let the assistant capture views and make bounded corrections after applying"><input type="checkbox" v-model="autoRefine"> Auto-refine</label><select v-if="autoRefine" v-model.number="refinePasses" :disabled="working" title="Maximum automatic passes" aria-label="Maximum automatic refinement passes"><option v-for="count in [1,2,3,4]" :key="count" :value="count">{{ count }}×</option></select><button class="bcs-provider" :disabled="working" @click="switchProvider" :title="'Using ' + provider.label + ' · click to switch to ' + otherProvider.label + ' (starts a new chat)'"><span class="material-icons">{{ provider.icon }}</span>{{ provider.label }}</button><select v-model="model" :disabled="working" :title="'Model · ' + provider.label"><option v-for="entry in provider.models" :key="entry.value" :value="entry.value">{{ entry.label }}</option></select><select v-model="effort" :disabled="working" title="Reasoning effort"><option v-for="level in provider.efforts" :key="level" :value="level">{{ level }}</option></select></div></section>
+          <footer class="bcs-composer"><textarea v-model="prompt" :disabled="working" @keydown.enter.exact.prevent="send" placeholder="Describe what to build or change…"></textarea><button class="bcs-attach" :class="{active:viewportAttached}" @click="toggleViewport" :disabled="working" :title="viewportAttached?'Remove attached viewport':'Attach current viewport'"><span class="material-icons">{{ viewportAttached ? 'close' : 'photo_camera' }}</span></button><button v-if="working" class="bcs-send stop" @click="stop" title="Stop" aria-label="Stop the current run"><span class="material-icons">stop</span></button><button v-else class="bcs-send" @click="send" :disabled="!prompt.trim()||!connected" title="Send" aria-label="Send message"><span class="material-icons">arrow_upward</span></button><button class="bcs-undo" @click="undo"><span class="material-icons">undo</span> Undo</button></footer></div>
         </div>`,
     } as any,
   });
@@ -324,9 +363,9 @@ export function createAssistantPanel(
     .bcs-shell .bcs-composer textarea{padding-right:58px}
     .bcs-shell .bcs-status{align-self:flex-start;margin:4px 0 0 10px;padding:1px 4px!important;background:transparent!important;border:0!important;line-height:16px;opacity:.72}
     .bcs-shell .bcs-status>span{width:6px;height:6px;box-shadow:none}
-    .bcs-shell>.bcs-header,.bcs-shell>.bcs-status,.bcs-shell>.bcs-context,.bcs-shell>.bcs-composer{flex:0 0 auto!important}
+    .bcs-shell>.bcs-topbar,.bcs-shell>.bcs-dock{flex:0 0 auto!important}
     .bcs-shell>.bcs-timeline{align-self:stretch!important;width:100%!important;flex-grow:1!important;flex-shrink:1!important}
-    .bcs-shell>.bcs-composer{margin-top:auto}
+    .bcs-shell>.bcs-dock{margin-top:auto}
     .bcs-shell .bcs-welcome{box-sizing:border-box;width:100%;padding:10px 4px}
     .bcs-shell{box-sizing:border-box!important;width:100%!important;height:100%!important;max-height:100%!important;min-height:0!important;overflow-x:hidden!important;overflow-y:auto!important;scrollbar-gutter:stable}
     .bcs-shell .bcs-timeline{box-sizing:border-box!important;flex:1 1 180px!important;height:auto!important;min-height:56px!important;max-height:none!important;resize:none;overflow-x:hidden!important;overflow-y:auto!important;overscroll-behavior:contain;scrollbar-gutter:stable}
@@ -336,6 +375,16 @@ export function createAssistantPanel(
     .bcs-shell .bcs-message-heading button{box-sizing:border-box!important;display:flex!important;align-items:center!important;justify-content:center!important;min-width:20px!important;width:20px!important;max-width:20px!important;height:20px!important;margin:-3px -4px -3px 0!important;padding:0!important;border:0!important;background:transparent!important;opacity:.45}
     .bcs-shell .bcs-message-heading button:hover{opacity:1}
     .bcs-shell .bcs-message-heading button .material-icons{font-size:13px!important}
+    .bcs-shell>.bcs-topbar{position:sticky;top:0;z-index:2;flex:0 0 auto;background:var(--color-ui)}
+    .bcs-shell>.bcs-dock{margin-top:auto;position:sticky;bottom:0;z-index:2;flex:0 0 auto;background:var(--color-back);border-top:1px solid var(--color-border)}
+    .bcs-shell>.bcs-dock>.bcs-context{border-top:0}
+    .bcs-shell>.bcs-timeline{overscroll-behavior:contain}
+    .bcs-shell :focus-visible{outline:2px solid var(--color-accent);outline-offset:1px;border-radius:4px}
+    .bcs-shell .bcs-long{display:flex;flex-direction:column;align-items:flex-start;gap:4px}
+    .bcs-shell .bcs-long p{margin:3px 0 0;white-space:pre-wrap}
+    .bcs-shell .bcs-long button{height:20px;padding:0 8px;border:1px solid var(--color-border);border-radius:10px;background:transparent;font-size:10px;opacity:.8}
+    .bcs-shell .bcs-long button:hover{opacity:1;background:var(--color-button)}
+    .bcs-shell .bcs-toolbar select[aria-label]{min-width:38px}
   `);
   return { panel, styles };
 }
