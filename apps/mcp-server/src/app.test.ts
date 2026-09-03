@@ -1,11 +1,20 @@
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import request from "supertest";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
-import { blockbenchSnapshotSchema } from "@blockbench-codex/contracts";
+import {
+  blockbenchSnapshotSchema,
+  type DiagnosticsReport,
+  type RecoveryReport,
+  type SelfTestReport,
+} from "@blockbench-codex/contracts";
 
 import { createStudioApp, startStudioServer } from "./app.js";
 import { SnapshotStore } from "./snapshot-store.js";
+import { CrashJournal } from "./crash-recovery.js";
 
 const token = "test-token-that-is-at-least-32-characters-long";
 const authorization = { Authorization: `Bearer ${token}` };
@@ -96,7 +105,81 @@ async function pollUntil(
   throw new Error("The capture command was never queued.");
 }
 
+const offlineProbes = {
+  env: {},
+  codexInstalled: () => false,
+  credentialStored: () => Promise.resolve(false),
+  comfyUiReachable: () => Promise.resolve(false),
+  now: () => new Date("2026-09-02T10:00:00.000Z"),
+};
+
 describe("studio HTTP app", () => {
+  it("serves diagnostics, a self-test, and the previous run's recovery report", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "bcs-app-journal-"));
+    try {
+      const journalPath = join(directory, "pending-work.json");
+      new CrashJournal(journalPath).record({
+        drafts: [],
+        commands: [
+          {
+            commandId: "44444444-4444-4444-8444-444444444444",
+            projectId: "specimen",
+            action: "undo",
+          },
+        ],
+      } as never);
+      const app = createStudioApp(
+        token,
+        new SnapshotStore(),
+        48172,
+        offlineProbes,
+        new CrashJournal(journalPath),
+      );
+      await request(app)
+        .post("/bridge/snapshot")
+        .set(authorization)
+        .send(snapshot)
+        .expect(202);
+
+      const diagnostics = await request(app)
+        .get("/bridge/diagnostics")
+        .set(authorization)
+        .expect(200);
+      expect(diagnostics.body).toMatchObject({
+        connection: {
+          url: "http://127.0.0.1:48172/mcp",
+          tokenConfigured: true,
+        },
+        project: { id: "specimen" },
+        recovery: { unclean: true },
+      });
+      expect(diagnostics.text).not.toContain(token);
+
+      const selfTest = await request(app)
+        .post("/bridge/diagnostics/self-test")
+        .set(authorization)
+        .expect(200);
+      expect((selfTest.body as SelfTestReport).checks.length).toBeGreaterThan(
+        0,
+      );
+
+      const recovery = await request(app)
+        .get("/bridge/recovery")
+        .set(authorization)
+        .expect(200);
+      expect((recovery.body as RecoveryReport).commands).toHaveLength(1);
+
+      const dismissed = await request(app)
+        .post("/bridge/recovery/dismiss")
+        .set(authorization)
+        .expect(200);
+      expect(dismissed.body).toMatchObject({ unclean: false, commands: [] });
+      await request(app).get("/bridge/diagnostics").expect(401);
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
   it("rejects unauthenticated and browser-origin requests", async () => {
     const app = createStudioApp(token);
     await request(app).get("/health").expect(401);
@@ -247,6 +330,40 @@ describe("studio HTTP app", () => {
       .expect(200, { events: [] });
   });
 
+  it("logs failed tool calls into the diagnostics report", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "bcs-tool-log-"));
+    const running = await startStudioServer({
+      token,
+      port: 0,
+      journal: new CrashJournal(join(directory, "pending-work.json")),
+    });
+    const client = new Client({ name: "diagnostics-test", version: "1.0.0" });
+    const transport = new StreamableHTTPClientTransport(
+      new URL(`http://127.0.0.1:${running.port}/mcp`),
+      { requestInit: { headers: authorization } },
+    );
+
+    try {
+      await client.connect(transport);
+      // No snapshot has been published, so this tool must fail.
+      await client.callTool({ name: "get_project_summary", arguments: {} });
+
+      const diagnostics = await request(running.app)
+        .get("/bridge/diagnostics")
+        .set(authorization)
+        .expect(200);
+      const report = diagnostics.body as DiagnosticsReport;
+      expect(report.recentErrors).toMatchObject([
+        { toolName: "get_project_summary", success: false },
+      ]);
+      expect(report.recentTools[0]?.durationMilliseconds).toBeTypeOf("number");
+    } finally {
+      await client.close();
+      await running.close();
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
   it("serves live Blockbench state through the MCP tool loop", async () => {
     const running = await startStudioServer({ token, port: 0 });
     running.store.set(snapshot);
@@ -304,6 +421,8 @@ describe("studio HTTP app", () => {
         "commit_refinement_draft",
         "stop_refinement",
         "get_refinement_report",
+        "get_diagnostics",
+        "run_self_test",
       ]);
       expect(
         tools.tools.find((tool) => tool.name === "get_selection")?.annotations,

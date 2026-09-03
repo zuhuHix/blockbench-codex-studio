@@ -71,6 +71,9 @@ export const blockbenchSnapshotSchema = z.object({
   outline: z.array(outlineNodeSchema),
   elements: z.array(cubeElementSchema),
   viewport: viewportCaptureSchema.optional(),
+  /** Reported on the diagnostics page so installed versions stay distinguishable. */
+  pluginVersion: z.string().min(1).optional(),
+  blockbenchVersion: z.string().min(1).optional(),
   capturedAt: z.iso.datetime(),
 });
 

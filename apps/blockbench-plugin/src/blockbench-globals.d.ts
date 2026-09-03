@@ -58,6 +58,7 @@ declare const MenuBar: {
   };
 };
 declare const Blockbench: {
+  readonly version?: string;
   showQuickMessage(message: string, duration?: number): void;
   addCSS(css: string): { delete(): void };
   pickDirectory?(options: {

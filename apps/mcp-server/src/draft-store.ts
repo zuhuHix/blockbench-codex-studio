@@ -18,6 +18,7 @@ import {
   type TransactionId,
 } from "@blockbench-codex/contracts";
 import { containsBounds, dimensions } from "@blockbench-codex/geometry";
+import type { JournalledDraft, JournalState } from "./crash-recovery.js";
 
 interface DraftRecord {
   readonly projectId: string;
@@ -37,6 +38,30 @@ function sameSize(a: Bounds3, b: Bounds3): boolean {
 export class DraftStore {
   readonly #drafts = new Map<string, DraftRecord>();
   readonly #commands: BridgeCommand[] = [];
+  readonly #onChange: (state: JournalState) => void;
+
+  /**
+   * `onChange` receives every in-flight state change so a crash journal can
+   * mirror uncommitted work to disk.
+   */
+  constructor(onChange: (state: JournalState) => void = () => {}) {
+    this.#onChange = onChange;
+  }
+
+  /** Drafts that were begun but never committed or discarded. */
+  openDrafts(): readonly JournalledDraft[] {
+    return [...this.#drafts.values()].map((draft) => ({
+      projectId: draft.projectId,
+      summary: draft.summary,
+    }));
+  }
+
+  #changed(): void {
+    this.#onChange({
+      drafts: this.openDrafts(),
+      commands: [...this.#commands],
+    });
+  }
 
   begin(snapshot: BlockbenchSnapshot, label: string): DraftSummary {
     const summary = draftSummarySchema.parse({
@@ -49,6 +74,7 @@ export class DraftStore {
       projectId: snapshot.project.id,
       summary,
     });
+    this.#changed();
     return summary;
   }
 
@@ -152,6 +178,7 @@ export class DraftStore {
         },
       ],
     });
+    this.#changed();
     return draft.summary;
   }
 
@@ -207,6 +234,7 @@ export class DraftStore {
         },
       ],
     });
+    this.#changed();
     return draft.summary;
   }
 
@@ -247,6 +275,7 @@ export class DraftStore {
     });
     this.#commands.push(command);
     this.#drafts.delete(transactionId);
+    this.#changed();
     return command;
   }
 
@@ -267,6 +296,7 @@ export class DraftStore {
       elementIds: uniqueIds,
     });
     this.#commands.push(command);
+    this.#changed();
     return command;
   }
 
@@ -277,6 +307,7 @@ export class DraftStore {
       action: "undo",
     });
     this.#commands.push(command);
+    this.#changed();
     return command;
   }
 
@@ -302,6 +333,7 @@ export class DraftStore {
       applyElementIds,
     });
     this.#commands.push(command);
+    this.#changed();
     return command;
   }
 
@@ -322,12 +354,14 @@ export class DraftStore {
       size,
     });
     this.#commands.push(command);
+    this.#changed();
     return command;
   }
 
   discard(transactionId: TransactionId): void {
     if (!this.#drafts.delete(transactionId))
       throw new Error("Draft transaction was not found.");
+    this.#changed();
   }
 
   pending(): readonly BridgeCommand[] {
@@ -338,6 +372,9 @@ export class DraftStore {
     const index = this.#commands.findIndex(
       (command) => command.commandId === commandId,
     );
-    if (index >= 0) this.#commands.splice(index, 1);
+    if (index >= 0) {
+      this.#commands.splice(index, 1);
+      this.#changed();
+    }
   }
 }

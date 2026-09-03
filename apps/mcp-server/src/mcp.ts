@@ -24,6 +24,12 @@ import { TextureDestinationStore } from "./texture-destinations.js";
 import { convertToPixelArt, inspectImageAlpha } from "./image-conversion.js";
 import { ViewCaptureStore } from "./view-capture-store.js";
 import { RefinementStore } from "./refinement-store.js";
+import { DiagnosticsStore } from "./diagnostics-store.js";
+import {
+  buildDiagnosticsReport,
+  runSelfTest,
+  type DiagnosticsDependencies,
+} from "./diagnostics.js";
 import {
   bounds3Schema,
   cubeFaceNameSchema,
@@ -149,11 +155,65 @@ export function createMcpServer(
   imageDispatch: ImageDispatchDependencies = defaultImageDispatchDependencies,
   viewCaptures = new ViewCaptureStore(),
   refinements = new RefinementStore(),
+  diagnostics = new DiagnosticsStore(),
+  diagnosticsDependencies?: () => DiagnosticsDependencies,
 ): McpServer {
   const server = new McpServer({
     name: "blockbench-codex-studio",
     version: "0.1.0",
   });
+
+  // Every tool below is logged the same way, so the wrapper lives here rather
+  // than in forty-odd call sites. Only the name, duration, outcome, affected
+  // UUIDs, and transaction are kept — never arguments, prompts, or images.
+  const registerTool = server.registerTool.bind(server);
+  server.registerTool = ((name: string, config: never, handler: never) =>
+    registerTool(name, config, ((...handlerArguments: unknown[]) => {
+      const startedAtMilliseconds = Date.now();
+      const input = (handlerArguments[0] ?? {}) as Record<string, unknown>;
+      const elementIds = Array.isArray(input.elementIds)
+        ? input.elementIds.filter(
+            (value): value is string => typeof value === "string",
+          )
+        : typeof input.elementId === "string"
+          ? [input.elementId]
+          : [];
+      const finish = (success: boolean, error?: string) =>
+        diagnostics.record({
+          toolName: name,
+          startedAtMilliseconds,
+          durationMilliseconds: Date.now() - startedAtMilliseconds,
+          success,
+          ...(error === undefined ? {} : { error }),
+          affectedElementIds: elementIds,
+          ...(typeof input.transactionId === "string"
+            ? { transactionId: input.transactionId }
+            : {}),
+        });
+      const describe = (error: unknown) =>
+        error instanceof Error ? error.message : "Tool call failed.";
+      try {
+        const result = (handler as (...args: unknown[]) => unknown)(
+          ...handlerArguments,
+        );
+        if (result instanceof Promise)
+          return (result as Promise<unknown>).then(
+            (value: unknown) => {
+              finish(true);
+              return value;
+            },
+            (error: unknown) => {
+              finish(false, describe(error));
+              throw error;
+            },
+          );
+        finish(true);
+        return result;
+      } catch (error) {
+        finish(false, describe(error));
+        throw error;
+      }
+    }) as never)) as typeof server.registerTool;
 
   server.registerTool(
     "health",
@@ -1157,6 +1217,36 @@ export function createMcpServer(
       inputSchema: { sessionId: refinementSessionIdSchema },
     },
     ({ sessionId }) => jsonContent(refinements.report(sessionId)),
+  );
+
+  server.registerTool(
+    "get_diagnostics",
+    {
+      description:
+        "Report versions, connection, permissions, image providers, recent tool errors, and recovered work. Contains no secrets.",
+      annotations: probeAnnotations,
+    },
+    async () => {
+      if (diagnosticsDependencies === undefined)
+        throw new Error("Diagnostics are only available on the live server.");
+      return jsonContent(
+        await buildDiagnosticsReport(diagnosticsDependencies()),
+      );
+    },
+  );
+
+  server.registerTool(
+    "run_self_test",
+    {
+      description:
+        "Check the bridge connection, published project, command queue, image backend, and recent errors.",
+      annotations: probeAnnotations,
+    },
+    async () => {
+      if (diagnosticsDependencies === undefined)
+        throw new Error("The self-test is only available on the live server.");
+      return jsonContent(await runSelfTest(diagnosticsDependencies()));
+    },
   );
 
   return server;
