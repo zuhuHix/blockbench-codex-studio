@@ -158,6 +158,21 @@ Tools: `get_texture_destination`, `set_texture_destination`, `save_image_variant
 
 Tools: `inspect_image_transparency`, `convert_image_to_pixel_art`, `import_image_variant`. Endpoints: `GET /bridge/image-variants/:id/transparency`, `POST /bridge/image-variants/:id/convert`, and `POST /bridge/image-variants/:id/import`.
 
+## Phase 6 multi-view capture
+
+`capture_views` asks Blockbench for one image per standard camera angle in a single tool call, instead of the single stale `capture_viewport` frame. The angles are `front`, `back`, `left`, `right`, `top`, `bottom`, and `isometric`; the default set is front, right, back, left, top, and isometric at 768x768.
+
+The round trip is a typed bridge command, not a new channel. The MCP tool queues a `capture_views` command carrying a `requestId`, then awaits that request in the server's `ViewCaptureStore`. The plugin picks the command up on its normal poll, drives the preview camera, and posts the finished set to `POST /bridge/view-captures`, which resolves the waiting tool call. A failed acknowledgement rejects the same waiter with the plugin's own message, and an unanswered request times out after 20 seconds rather than hanging the tool.
+
+Capturing is read-only by construction:
+
+- The camera position, orbit target, and projection mode are recorded before the sweep and restored in a `finally`, so a capture cannot leave the user looking somewhere else.
+- Axis views render orthographically and `isometric` renders in perspective, matching Blockbench's own presets.
+- The camera pulls back to `max(64, largest extent * 2.4)` so a large model still fits the frame at every angle.
+- No element, texture, or selection is touched, so nothing enters the Undo stack. `applyCommand` explicitly refuses `capture_views` — it belongs to `view-capture.ts`.
+
+Tools: `capture_views`. Endpoint: `POST /bridge/view-captures`.
+
 ## Workspace map
 
 - `apps/blockbench-plugin`: in-process Blockbench adapter and UI

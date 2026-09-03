@@ -77,6 +77,25 @@ const snapshot = blockbenchSnapshotSchema.parse({
   capturedAt: "2026-09-01T09:00:00.000Z",
 });
 
+interface CapturedCommand {
+  readonly commandId: string;
+  readonly action?: string;
+  readonly requestId: string;
+  readonly angles: ("front" | "top")[];
+  readonly size: number;
+}
+
+async function pollUntil(
+  read: () => Promise<CapturedCommand | undefined>,
+): Promise<CapturedCommand> {
+  for (let attempt = 0; attempt < 50; attempt += 1) {
+    const value = await read();
+    if (value !== undefined) return value;
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  }
+  throw new Error("The capture command was never queued.");
+}
+
 describe("studio HTTP app", () => {
   it("rejects unauthenticated and browser-origin requests", async () => {
     const app = createStudioApp(token);
@@ -247,6 +266,7 @@ describe("studio HTTP app", () => {
         "set_selection",
         "list_outline",
         "capture_viewport",
+        "capture_views",
         "begin_draft",
         "move_cube_preserve_size",
         "get_draft_summary",
@@ -361,6 +381,101 @@ describe("studio HTTP app", () => {
         '\\"kind\\": \\"set_face_uv\\"',
       );
       expect(JSON.stringify(projected)).toContain('\\"operations\\": [');
+    } finally {
+      await client.close();
+      await running.close();
+    }
+  });
+  it("round-trips a multi-view capture between the MCP tool and the plugin", async () => {
+    const running = await startStudioServer({ token, port: 0 });
+    running.store.set(snapshot);
+    const client = new Client({ name: "views-test", version: "1.0.0" });
+    const transport = new StreamableHTTPClientTransport(
+      new URL(`http://127.0.0.1:${running.port}/mcp`),
+      { requestInit: { headers: authorization } },
+    );
+
+    try {
+      await client.connect(transport);
+      const pending = client.callTool({
+        name: "capture_views",
+        arguments: { angles: ["front", "top"], size: 128 },
+      });
+
+      const queued = await pollUntil(async () => {
+        const response = await request(running.app)
+          .get("/bridge/commands")
+          .set(authorization)
+          .expect(200);
+        return (response.body as { commands: CapturedCommand[] }).commands.find(
+          (command) => command.action === "capture_views",
+        );
+      });
+      expect(queued.angles).toEqual(["front", "top"]);
+      expect(queued.size).toBe(128);
+
+      await request(running.app)
+        .post("/bridge/view-captures")
+        .set(authorization)
+        .send({
+          requestId: queued.requestId,
+          projectId: "specimen",
+          views: queued.angles.map((angle) => ({
+            angle,
+            mimeType: "image/png",
+            dataBase64: "aW1hZ2U=",
+            width: 128,
+            height: 128,
+            capturedAt: new Date().toISOString(),
+          })),
+          capturedAt: new Date().toISOString(),
+        })
+        .expect(202);
+
+      const result = JSON.stringify(await pending);
+      expect(result).toContain('"type":"image"');
+      expect(result).toContain("front");
+      expect(result).toContain("top");
+    } finally {
+      await client.close();
+      await running.close();
+    }
+  });
+
+  it("fails the awaiting capture tool when the plugin reports an error", async () => {
+    const running = await startStudioServer({ token, port: 0 });
+    running.store.set(snapshot);
+    const client = new Client({ name: "views-failure-test", version: "1.0.0" });
+    const transport = new StreamableHTTPClientTransport(
+      new URL(`http://127.0.0.1:${running.port}/mcp`),
+      { requestInit: { headers: authorization } },
+    );
+
+    try {
+      await client.connect(transport);
+      const pending = client.callTool({
+        name: "capture_views",
+        arguments: { angles: ["front"] },
+      });
+      const queued = await pollUntil(async () => {
+        const response = await request(running.app)
+          .get("/bridge/commands")
+          .set(authorization)
+          .expect(200);
+        return (response.body as { commands: CapturedCommand[] }).commands.find(
+          (command) => command.action === "capture_views",
+        );
+      });
+      await request(running.app)
+        .post("/bridge/commands/ack")
+        .set(authorization)
+        .send({
+          commandId: queued.commandId,
+          success: false,
+          error: "Blockbench has no active preview to capture.",
+        })
+        .expect(202);
+      expect(JSON.stringify(await pending)).toContain("no active preview");
     } finally {
       await client.close();
       await running.close();

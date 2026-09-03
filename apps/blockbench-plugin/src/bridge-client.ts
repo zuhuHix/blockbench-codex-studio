@@ -7,6 +7,7 @@ import type {
   ImageReferenceRole,
   ImageVariant,
   ImageAlphaInspection,
+  MultiViewCapture,
   PixelArtConversion,
   SavedTexture,
   TextureDestination,
@@ -165,6 +166,13 @@ export async function publishSnapshot(
   snapshot: Snapshot,
 ): Promise<void> {
   await requestJson(settings, "/bridge/snapshot", "POST", snapshot);
+}
+
+export async function publishViewCaptures(
+  settings: BridgeSettings,
+  capture: MultiViewCapture,
+): Promise<void> {
+  await requestJson(settings, "/bridge/view-captures", "POST", capture);
 }
 
 export async function fetchImageVariants(

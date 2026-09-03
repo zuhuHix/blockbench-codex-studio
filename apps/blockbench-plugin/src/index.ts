@@ -2,6 +2,7 @@ import {
   acknowledgeCommand,
   fetchCommands,
   publishSnapshot,
+  publishViewCaptures,
   requestJson,
   type BridgeSettings,
 } from "./bridge-client.js";
@@ -9,6 +10,7 @@ import type * as ChildProcess from "node:child_process";
 import type * as NodeProcess from "node:process";
 import { captureSnapshot, captureViewport } from "./snapshot.js";
 import { applyCommand } from "./command-applier.js";
+import { captureViews } from "./view-capture.js";
 import { createAssistantPanel } from "./assistant-panel.js";
 import { createGalleryPanel } from "./gallery-panel.js";
 
@@ -92,14 +94,22 @@ async function pollCommands(settings: BridgeSettings): Promise<void> {
   try {
     for (const command of await fetchCommands(settings)) {
       try {
-        applyCommand(command);
-        await publish(true);
+        if ("action" in command && command.action === "capture_views")
+          await publishViewCaptures(settings, await captureViews(command));
+        else {
+          applyCommand(command);
+          await publish(true);
+        }
         await acknowledgeCommand(settings, {
           commandId: command.commandId,
           success: true,
         });
         Blockbench.showQuickMessage(
-          `Applied: ${"label" in command ? command.label : "Selection updated"}`,
+          "label" in command
+            ? `Applied: ${command.label}`
+            : "action" in command && command.action === "capture_views"
+              ? `Captured ${command.angles.length} views`
+              : "Selection updated",
           2000,
         );
       } catch (error) {

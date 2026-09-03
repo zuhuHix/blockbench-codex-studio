@@ -18,6 +18,7 @@ import {
 import { VariantStore } from "./variant-store.js";
 import { TextureDestinationStore } from "./texture-destinations.js";
 import { convertToPixelArt, inspectImageAlpha } from "./image-conversion.js";
+import { ViewCaptureStore } from "./view-capture-store.js";
 import {
   bounds3Schema,
   cubeFaceNameSchema,
@@ -30,6 +31,7 @@ import {
   imageSizeSchema,
   pixelArtConversionSchema,
   transactionIdSchema,
+  viewAngleSchema,
 } from "@blockbench-codex/contracts";
 import { z } from "zod";
 import {
@@ -101,6 +103,7 @@ export function createMcpServer(
   variants = new VariantStore(),
   destinations = new TextureDestinationStore(),
   imageDispatch: ImageDispatchDependencies = defaultImageDispatchDependencies,
+  viewCaptures = new ViewCaptureStore(),
 ): McpServer {
   const server = new McpServer({
     name: "blockbench-codex-studio",
@@ -206,6 +209,48 @@ export function createMcpServer(
               width: viewport.width,
               height: viewport.height,
               capturedAt: viewport.capturedAt,
+            }),
+          },
+        ],
+      };
+    },
+  );
+
+  server.registerTool(
+    "capture_views",
+    {
+      description:
+        "Drive the Blockbench camera through standard angles and return one image per angle. The camera is restored afterwards and the model is never modified.",
+      annotations: readOnlyAnnotations,
+      inputSchema: {
+        angles: z.array(viewAngleSchema).min(1).max(7).optional(),
+        size: z.number().int().min(64).max(2048).optional(),
+      },
+    },
+    async ({ angles, size }) => {
+      const snapshot = requireSnapshot(store);
+      const command = drafts.captureViews(
+        snapshot,
+        angles ?? ["front", "right", "back", "left", "top", "isometric"],
+        size ?? 768,
+      );
+      const capture = await viewCaptures.wait(command.requestId);
+      return {
+        content: [
+          ...capture.views.map((view) => ({
+            type: "image" as const,
+            data: view.dataBase64,
+            mimeType: view.mimeType,
+          })),
+          {
+            type: "text" as const,
+            text: JSON.stringify({
+              capturedAt: capture.capturedAt,
+              views: capture.views.map((view) => ({
+                angle: view.angle,
+                width: view.width,
+                height: view.height,
+              })),
             }),
           },
         ],

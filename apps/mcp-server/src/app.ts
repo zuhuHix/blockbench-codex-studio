@@ -4,6 +4,7 @@ import { createMcpExpressApp } from "@modelcontextprotocol/sdk/server/express.js
 import {
   blockbenchSnapshotSchema,
   commandAcknowledgementSchema,
+  multiViewCaptureSchema,
   imageReferenceRoleSchema,
   pixelArtConversionSchema,
 } from "@blockbench-codex/contracts";
@@ -24,6 +25,7 @@ import { ReferenceStore } from "./reference-store.js";
 import { VariantStore } from "./variant-store.js";
 import { TextureDestinationStore } from "./texture-destinations.js";
 import { revealInFileManager } from "./reveal.js";
+import { ViewCaptureStore } from "./view-capture-store.js";
 import { convertToPixelArt, inspectImageAlpha } from "./image-conversion.js";
 
 const chatMessageSchema = z.object({
@@ -62,6 +64,7 @@ export function createStudioApp(
   const references = new ReferenceStore();
   const variants = new VariantStore();
   const destinations = new TextureDestinationStore();
+  const viewCaptures = new ViewCaptureStore();
 
   app.post("/bridge/chat/sessions", authenticate, (_request, response) => {
     response.status(201).json({ sessionId: chats.create() });
@@ -455,6 +458,19 @@ export function createStudioApp(
     response.status(202).json({ accepted: true });
   });
 
+  app.post("/bridge/view-captures", authenticate, (request, response) => {
+    const parsed = multiViewCaptureSchema.safeParse(request.body);
+    if (!parsed.success) {
+      response.status(400).json({
+        error: "Invalid multi-view capture.",
+        issues: parsed.error.issues,
+      });
+      return;
+    }
+    viewCaptures.complete(parsed.data);
+    response.status(202).json({ accepted: true });
+  });
+
   app.get("/bridge/commands", authenticate, (_request, response) => {
     response.json({ commands: drafts.pending() });
   });
@@ -465,6 +481,19 @@ export function createStudioApp(
       response.status(400).json({ error: "Invalid command acknowledgement." });
       return;
     }
+    const command = drafts
+      .pending()
+      .find((pending) => pending.commandId === parsed.data.commandId);
+    if (
+      !parsed.data.success &&
+      command !== undefined &&
+      "action" in command &&
+      command.action === "capture_views"
+    )
+      viewCaptures.fail(
+        command.requestId,
+        parsed.data.error ?? "Blockbench could not capture the views.",
+      );
     drafts.acknowledge(parsed.data.commandId);
     response.status(202).json({ accepted: true });
   });
@@ -477,6 +506,8 @@ export function createStudioApp(
       references,
       variants,
       destinations,
+      undefined,
+      viewCaptures,
     );
     const transport = new StreamableHTTPServerTransport({
       sessionIdGenerator: undefined,

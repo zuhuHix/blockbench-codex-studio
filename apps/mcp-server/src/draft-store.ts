@@ -4,6 +4,7 @@ import {
   setSelectionCommandSchema,
   undoCommandSchema,
   importTextureCommandSchema,
+  captureViewsCommandSchema,
   type BridgeCommand,
   draftSummarySchema,
   type ApplyDraftCommand,
@@ -13,6 +14,7 @@ import {
   type CubeFaceUv,
   type DraftSummary,
   type ElementId,
+  type ViewAngle,
   type TransactionId,
 } from "@blockbench-codex/contracts";
 import { containsBounds, dimensions } from "@blockbench-codex/geometry";
@@ -298,6 +300,26 @@ export class DraftStore {
       action: "import_texture",
       ...input,
       applyElementIds,
+    });
+    this.#commands.push(command);
+    return command;
+  }
+
+  captureViews(
+    snapshot: BlockbenchSnapshot,
+    angles: readonly ViewAngle[],
+    size: number,
+  ): BridgeCommand & { readonly requestId: string } {
+    const uniqueAngles = [...new Set(angles)];
+    if (uniqueAngles.length === 0)
+      throw new Error("Requested at least one camera angle.");
+    const command = captureViewsCommandSchema.parse({
+      commandId: randomUUID(),
+      projectId: snapshot.project.id,
+      action: "capture_views",
+      requestId: randomUUID(),
+      angles: uniqueAngles,
+      size,
     });
     this.#commands.push(command);
     return command;
