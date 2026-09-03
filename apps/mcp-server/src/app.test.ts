@@ -5,6 +5,7 @@ import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/
 import { blockbenchSnapshotSchema } from "@blockbench-codex/contracts";
 
 import { createStudioApp, startStudioServer } from "./app.js";
+import { SnapshotStore } from "./snapshot-store.js";
 
 const token = "test-token-that-is-at-least-32-characters-long";
 const authorization = { Authorization: `Bearer ${token}` };
@@ -104,6 +105,103 @@ describe("studio HTTP app", () => {
     });
   });
 
+  it("serves the image provider report without leaking credentials", async () => {
+    const app = createStudioApp(token, new SnapshotStore(), 48172, {
+      env: { OPENAI_API_KEY: "sk-secret-value" },
+      codexInstalled: () => false,
+      credentialStored: () => Promise.resolve(false),
+      comfyUiReachable: () => Promise.resolve(false),
+      now: () => new Date("2026-09-02T10:00:00.000Z"),
+    });
+    const response = await request(app)
+      .get("/bridge/image-providers")
+      .set(authorization)
+      .expect(200);
+    expect(response.body).toMatchObject({
+      selectedProviderId: "openai-image",
+      incursApiCost: true,
+    });
+    expect(response.text).not.toContain("sk-secret-value");
+    await request(app).get("/bridge/image-providers").expect(401);
+  });
+
+  it("serves the gallery, favorites, and reference reuse over the bridge", async () => {
+    const pngBase64 = Buffer.from([
+      0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a,
+    ]).toString("base64");
+    const client = new Client({ name: "gallery-test", version: "1.0.0" });
+    const server = await startStudioServer({ token, port: 0 });
+    try {
+      const transport = new StreamableHTTPClientTransport(
+        new URL(`http://127.0.0.1:${server.port}/mcp`),
+        { requestInit: { headers: authorization } },
+      );
+      await client.connect(transport);
+      await client.callTool({
+        name: "record_image_variant",
+        arguments: {
+          name: "Lab wall",
+          mode: "new-seamless-texture",
+          prompt: "mossy lab wall",
+          providerId: "comfyui",
+          mimeType: "image/png",
+          dataBase64: pngBase64,
+          width: 64,
+          height: 64,
+        },
+      });
+
+      const listed = await request(server.app)
+        .get("/bridge/image-variants")
+        .set(authorization)
+        .expect(200);
+      const [variant] = (listed.body as { variants: { id: string }[] })
+        .variants;
+      expect(variant).toBeDefined();
+      expect(listed.text).not.toContain(pngBase64);
+
+      const image = await request(server.app)
+        .get(`/bridge/image-variants/${variant!.id}`)
+        .set(authorization)
+        .expect(200);
+      expect((image.body as { dataBase64: string }).dataBase64).toBe(pngBase64);
+
+      const favorited = await request(server.app)
+        .post(`/bridge/image-variants/${variant!.id}/favorite`)
+        .set(authorization)
+        .send({ favorite: true })
+        .expect(200);
+      expect((favorited.body as { favorite: boolean }).favorite).toBe(true);
+
+      const reference = await request(server.app)
+        .post(`/bridge/image-variants/${variant!.id}/reference`)
+        .set(authorization)
+        .send({ role: "palette" })
+        .expect(201);
+      expect(reference.body).toMatchObject({
+        source: "generated-variant",
+        role: "palette",
+        name: "Lab wall",
+      });
+      await request(server.app)
+        .get("/bridge/image-references")
+        .set(authorization)
+        .expect(200);
+
+      await request(server.app)
+        .post(`/bridge/image-variants/${variant!.id}/remove`)
+        .set(authorization)
+        .expect(200);
+      await request(server.app)
+        .get(`/bridge/image-variants/${variant!.id}`)
+        .set(authorization)
+        .expect(404);
+      await client.close();
+    } finally {
+      await server.close();
+    }
+  });
+
   it("rejects malformed snapshots", async () => {
     const app = createStudioApp(token);
     await request(app)
@@ -165,6 +263,21 @@ describe("studio HTTP app", () => {
         "audit_uv_seams",
         "pack_uv_islands",
         "normalize_texel_density",
+        "detect_image_providers",
+        "add_image_reference",
+        "list_image_references",
+        "remove_image_reference",
+        "plan_image_generation",
+        "record_image_variant",
+        "generate_image",
+        "list_image_variants",
+        "inspect_image_transparency",
+        "convert_image_to_pixel_art",
+        "use_variant_as_reference",
+        "get_texture_destination",
+        "set_texture_destination",
+        "save_image_variant",
+        "import_image_variant",
       ]);
       expect(
         tools.tools.find((tool) => tool.name === "get_selection")?.annotations,

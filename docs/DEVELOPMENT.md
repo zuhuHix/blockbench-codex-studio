@@ -103,6 +103,61 @@ codex mcp add blockbench-codex-studio --url http://127.0.0.1:48172/mcp --bearer-
 
 Do not commit the token or place it in the Blockbench project file.
 
+## Phase 5 image provider detection
+
+The `detect_image_providers` MCP tool and the authenticated `GET /bridge/image-providers` endpoint report every image generation backend, which one will be used, and whether it may bill the user. The report never contains a key, only where one was found.
+
+| Backend          | Configuration                                                                                                                      | Cost                          |
+| ---------------- | ---------------------------------------------------------------------------------------------------------------------------------- | ----------------------------- |
+| Codex-native     | Codex CLI installed, `BLOCKBENCH_CODEX_NATIVE_IMAGES=1`, and `BLOCKBENCH_CODEX_NATIVE_IMAGE_COMMAND` points to an approved adapter | none                          |
+| Local ComfyUI    | an instance answering `/system_stats` and `BLOCKBENCH_CODEX_COMFYUI_WORKFLOW` naming an API-format workflow JSON file              | none                          |
+| OpenAI GPT Image | `BLOCKBENCH_CODEX_OPENAI_API_KEY`, `OPENAI_API_KEY`, or the `BlockbenchCodexStudio:OpenAI` entry in Windows Credential Manager     | billed to your OpenAI account |
+
+Cost-free backends are selected first, so nothing bills the account while a local option works. A Codex or ChatGPT login is never assumed to grant image generation; it requires the explicit opt-in above. Store the API key with Windows Credential Manager rather than in the repository or a project file:
+
+```powershell
+cmdkey /generic:BlockbenchCodexStudio:OpenAI /user:openai /pass
+```
+
+## Phase 5 reference manager
+
+References are attached by name before any generation request is planned. `add_image_reference` takes the latest Blockbench capture when `source` is `viewport`; every other source supplies `mimeType`, `dataBase64`, `width`, and `height`. Payloads are validated against their declared format, capped at 8 MiB and 8 attachments, and never returned by `list_image_references` — tool results carry only names, provenance, roles, and sizes.
+
+Roles are `shape`, `palette`, `layout`, `style`, and `edit-target`. `plan_image_generation` returns the exact request that would be sent: the prompt, each reference with its role, the selected provider, whether it bills the account, and any warnings. Planning contacts no provider and imports nothing.
+
+The plan is `dispatchable: false` when a reference was detached or listed twice, when an editing mode (`edit-current-texture`, `inpaint-region`, `outpaint-extend`, `variation`, `pixel-art-conversion`) does not carry exactly one `edit-target`, or when no backend is configured. Advisory warnings, such as API cost or a decal without transparency, leave the plan dispatchable.
+
+`generate_image` dispatches the validated plan and records the result in the preview gallery without saving or importing it. OpenAI uses the current GPT Image API and requires `confirmApiCost: true` after explicit user approval. ComfyUI substitutes `{{PROMPT}}`, `{{WIDTH}}`, `{{HEIGHT}}`, `{{SEED}}`, and optional `{{REFERENCE_1}}` placeholders in the configured API-format workflow, then polls its history and downloads the first output. A Codex-native adapter receives the plan and reference payloads as JSON on stdin and returns one PNG payload as JSON on stdout. No paid request is made by the automated tests.
+
+## Phase 5 preview gallery
+
+Generated results are recorded with `record_image_variant` and reviewed in the **Codex Images** panel before anything is saved or imported. Recording a variant never writes a file, imports a texture, or touches the model.
+
+The panel polls `GET /bridge/image-variants` for metadata and fetches each image as a data URL through `GET /bridge/image-variants/:id`, because a Blockbench `img` element cannot carry the bridge bearer token. The grid shows thumbnails newest first; opening one gives a fit-to-panel viewer with zoom (wheel or buttons, 25%-1600%), drag panning, a transparency checkerboard, a pixel grid above 600%, and side-by-side comparison with a second variant. Metadata lists dimensions, format, alpha, provider, mode, seed, generation time, and the full prompt.
+
+Each variant can be favorited, discarded, or attached as a named reference in any role, which feeds straight back into the reference manager. The store keeps the 24 most recent variants and evicts unfavorited ones first, so favorites survive a long session. `hasAlphaChannel` reports only that the image _can_ carry transparency; whether the pixels are genuinely transparent rather than a painted checkerboard is verified at import in the next slice.
+
+## Phase 5 texture destinations
+
+The **Codex Images** panel shows the destination row for the active project: the project-relative path when the project has been saved, the absolute path otherwise, and whether the folder is writable. `Select texture folder…` opens the native Blockbench directory picker, and the folder is remembered per project in `%LOCALAPPDATA%\BlockbenchCodexStudio	exture-destinations.json`. The snapshot now publishes `project.filePath`, which is what makes the relative path and the suggested Minecraft folders (`assets/<modid>/textures/block`, `item`, `entity`) possible; any other folder is still selectable.
+
+Saving is deliberate and additive:
+
+- File names are sanitized to lowercase `a-z0-9_-` with a `.png` extension, so a generated title cannot escape the folder.
+- An existing file is never overwritten. A unique `_2`, `_3` name is used instead and the result reports `renamed: true`.
+- Each save appends one line to `codex-textures.jsonl` in the destination folder recording the file, prompt, mode, provider, seed, and dimensions. The manifest holds provenance only and never a credential.
+- `Reveal in Explorer` opens the folder itself, never a file.
+
+Tools: `get_texture_destination`, `set_texture_destination`, `save_image_variant`. Endpoints: `GET`/`POST /bridge/texture-destination`, `POST /bridge/texture-destination/reveal`, and `POST /bridge/image-variants/:id/save`. Saving alone writes a file but still imports nothing into Blockbench.
+
+## Phase 5 conversion, transparency, and import
+
+`inspect_image_transparency` decodes the pixels and counts transparent, translucent, and opaque texels, so an opaque image containing a painted checkerboard is correctly reported as opaque. `convert_image_to_pixel_art` preserves the source, creates a new PNG variant, uses nearest-neighbor scaling, and limits the palette to 2–256 colors; MCP callers can also provide an exact list of `#rrggbb` colors. The gallery exposes 16×16, 32×32, 64×64, and 128×128 presets plus alpha inspection.
+
+`import_image_variant` and the gallery's **Import** actions save additively into the remembered destination, then queue a typed bridge command. Blockbench imports the PNG as a new texture and can apply its UUID to every face of the selected cubes. Import plus application is wrapped in one named native Undo entry; no texture is applied merely because it was generated, converted, or saved.
+
+Tools: `inspect_image_transparency`, `convert_image_to_pixel_art`, `import_image_variant`. Endpoints: `GET /bridge/image-variants/:id/transparency`, `POST /bridge/image-variants/:id/convert`, and `POST /bridge/image-variants/:id/import`.
+
 ## Workspace map
 
 - `apps/blockbench-plugin`: in-process Blockbench adapter and UI

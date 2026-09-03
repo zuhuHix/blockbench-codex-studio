@@ -3,6 +3,7 @@ import {
   applyDraftCommandSchema,
   setSelectionCommandSchema,
   undoCommandSchema,
+  importTextureCommandSchema,
 } from "@blockbench-codex/contracts";
 
 import { applyCommand } from "./command-applier.js";
@@ -61,6 +62,60 @@ describe("Blockbench command application", () => {
     );
 
     expect(undo).toHaveBeenCalledOnce();
+  });
+
+  it("imports and applies a texture as one named Undo edit", () => {
+    const cube = {
+      uuid: "cube-a",
+      faces: { north: { texture: "old" }, south: { texture: "old" } },
+    };
+    class MockTexture {
+      static all: MockTexture[] = [];
+      readonly uuid = "texture-new";
+      readonly name = "culture.png";
+      readonly fromPath = vi.fn(() => this);
+      readonly add = vi.fn(() => {
+        MockTexture.all.push(this);
+        return this;
+      });
+      readonly select = vi.fn();
+    }
+    const initEdit = vi.fn();
+    const finishEdit = vi.fn();
+    const updateView = vi.fn();
+    vi.stubGlobal("Project", { uuid: "project" });
+    vi.stubGlobal("Cube", { all: [cube] });
+    vi.stubGlobal("Texture", MockTexture);
+    vi.stubGlobal("Undo", {
+      initEdit,
+      finishEdit,
+      cancelEdit: vi.fn(),
+    });
+    vi.stubGlobal("Canvas", { updateView });
+
+    applyCommand(
+      importTextureCommandSchema.parse({
+        commandId: "10000000-0000-4000-8000-000000000000",
+        projectId: "project",
+        action: "import_texture",
+        label: "Import and apply generated texture",
+        absolutePath: "C:\\textures\\culture.png",
+        textureName: "culture.png",
+        applyElementIds: ["cube-a"],
+      }),
+    );
+
+    expect(MockTexture.all[0]?.fromPath).toHaveBeenCalledWith(
+      "C:\\textures\\culture.png",
+    );
+    expect(cube.faces.north.texture).toBe("texture-new");
+    expect(cube.faces.south.texture).toBe("texture-new");
+    expect(initEdit).toHaveBeenCalledOnce();
+    expect(finishEdit).toHaveBeenCalledWith(
+      "Import and apply generated texture",
+      expect.any(Object),
+    );
+    expect(updateView).toHaveBeenCalledOnce();
   });
 
   it("applies a multi-cube draft as one named Undo edit and refreshes geometry", () => {

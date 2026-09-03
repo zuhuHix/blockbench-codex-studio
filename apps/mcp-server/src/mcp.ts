@@ -4,9 +4,31 @@ import type { BlockbenchSnapshot } from "@blockbench-codex/contracts";
 import type { SnapshotStore } from "./snapshot-store.js";
 import type { DraftStore } from "./draft-store.js";
 import {
+  defaultImageProviderProbes,
+  detectImageProviders,
+  type ImageProviderProbes,
+} from "./image-providers.js";
+import { ReferenceStore } from "./reference-store.js";
+import { planImageGeneration } from "./image-requests.js";
+import {
+  defaultImageDispatchDependencies,
+  dispatchImageGeneration,
+  type ImageDispatchDependencies,
+} from "./image-dispatch.js";
+import { VariantStore } from "./variant-store.js";
+import { TextureDestinationStore } from "./texture-destinations.js";
+import { convertToPixelArt, inspectImageAlpha } from "./image-conversion.js";
+import {
   bounds3Schema,
   cubeFaceNameSchema,
   cubeFaceUvSchema,
+  imageGenerationModeSchema,
+  imageProviderIdSchema,
+  imageMimeTypeSchema,
+  imageReferenceRoleSchema,
+  imageReferenceSourceSchema,
+  imageSizeSchema,
+  pixelArtConversionSchema,
   transactionIdSchema,
 } from "@blockbench-codex/contracts";
 import { z } from "zod";
@@ -29,6 +51,13 @@ const readOnlyAnnotations = {
   destructiveHint: false,
   idempotentHint: true,
   openWorldHint: false,
+} as const;
+/** Read-only, but reaches outside the process to probe local providers. */
+const probeAnnotations = {
+  readOnlyHint: true,
+  destructiveHint: false,
+  idempotentHint: true,
+  openWorldHint: true,
 } as const;
 const draftAnnotations = {
   readOnlyHint: false,
@@ -67,6 +96,11 @@ function requireTextureSize(snapshot: BlockbenchSnapshot) {
 export function createMcpServer(
   store: SnapshotStore,
   drafts: DraftStore,
+  imageProbes: ImageProviderProbes = defaultImageProviderProbes,
+  references = new ReferenceStore(),
+  variants = new VariantStore(),
+  destinations = new TextureDestinationStore(),
+  imageDispatch: ImageDispatchDependencies = defaultImageDispatchDependencies,
 ): McpServer {
   const server = new McpServer({
     name: "blockbench-codex-studio",
@@ -503,6 +537,424 @@ export function createMcpServer(
             );
         }
       return jsonContent(summary);
+    },
+  );
+
+  server.registerTool(
+    "detect_image_providers",
+    {
+      description:
+        "Report which image generation backends are configured, which one will be used, and whether it may incur API cost. Never returns secrets.",
+      annotations: probeAnnotations,
+    },
+    async () => jsonContent(await detectImageProviders(imageProbes)),
+  );
+
+  server.registerTool(
+    "add_image_reference",
+    {
+      description:
+        "Attach a named reference image for image generation. Use source 'viewport' to take the latest Blockbench capture, otherwise supply the image payload.",
+      annotations: draftAnnotations,
+      inputSchema: {
+        name: z.string().min(1).max(80),
+        source: imageReferenceSourceSchema,
+        role: imageReferenceRoleSchema,
+        mimeType: imageMimeTypeSchema.optional(),
+        dataBase64: z.string().min(1).optional(),
+        width: z.number().int().positive().max(4096).optional(),
+        height: z.number().int().positive().max(4096).optional(),
+      },
+    },
+    ({ name, source, role, mimeType, dataBase64, width, height }) => {
+      if (source === "viewport") {
+        const viewport = requireSnapshot(store).viewport;
+        if (viewport === undefined)
+          throw new Error(
+            "Blockbench has not published a viewport capture yet.",
+          );
+        return jsonContent(
+          references.add({
+            name,
+            source,
+            role,
+            mimeType: viewport.mimeType,
+            dataBase64: viewport.dataBase64,
+            width: viewport.width,
+            height: viewport.height,
+          }),
+        );
+      }
+      if (
+        dataBase64 === undefined ||
+        mimeType === undefined ||
+        width === undefined ||
+        height === undefined
+      )
+        throw new Error(
+          `Source ${source} requires mimeType, dataBase64, width, and height.`,
+        );
+      return jsonContent(
+        references.add({
+          name,
+          source,
+          role,
+          mimeType,
+          dataBase64,
+          width,
+          height,
+        }),
+      );
+    },
+  );
+
+  server.registerTool(
+    "list_image_references",
+    {
+      description:
+        "List the attached reference images with their names, sources, and roles. Image payloads are never returned.",
+      annotations: readOnlyAnnotations,
+    },
+    () => jsonContent({ references: references.list() }),
+  );
+
+  server.registerTool(
+    "remove_image_reference",
+    {
+      description: "Detach one reference image, or every reference at once.",
+      annotations: draftAnnotations,
+      inputSchema: {
+        referenceId: z.string().min(1).optional(),
+        all: z.boolean().default(false),
+      },
+    },
+    ({ referenceId, all }) => {
+      if (all) return jsonContent({ removed: references.clear() });
+      if (referenceId === undefined)
+        throw new Error("Provide a referenceId or set all to true.");
+      return jsonContent({
+        removed: 1,
+        reference: references.remove(referenceId),
+      });
+    },
+  );
+
+  server.registerTool(
+    "plan_image_generation",
+    {
+      description:
+        "Describe exactly which prompt, references, roles, and provider a generation request would use. Contacts no provider and imports nothing.",
+      annotations: probeAnnotations,
+      inputSchema: {
+        mode: imageGenerationModeSchema,
+        prompt: z.string().min(1).max(2000),
+        referenceIds: z.array(z.string().min(1)).max(8).default([]),
+        size: imageSizeSchema.default({ width: 512, height: 512 }),
+        transparentBackground: z.boolean().default(false),
+        seed: z.number().int().nonnegative().optional(),
+      },
+    },
+    async (request) =>
+      jsonContent(
+        planImageGeneration(
+          request,
+          references,
+          await detectImageProviders(imageProbes),
+        ),
+      ),
+  );
+
+  server.registerTool(
+    "record_image_variant",
+    {
+      description:
+        "Record a generated image in the preview gallery. Recording never saves a file, imports a texture, or changes the model.",
+      annotations: draftAnnotations,
+      inputSchema: {
+        name: z.string().min(1).max(80),
+        mode: imageGenerationModeSchema,
+        prompt: z.string().min(1).max(2000),
+        providerId: imageProviderIdSchema,
+        mimeType: imageMimeTypeSchema,
+        dataBase64: z.string().min(1),
+        width: z.number().int().positive().max(4096),
+        height: z.number().int().positive().max(4096),
+        requestId: z.string().min(1).optional(),
+        seed: z.number().int().nonnegative().optional(),
+        generationMs: z.number().int().nonnegative().optional(),
+      },
+    },
+    (input) => jsonContent(variants.add(input)),
+  );
+
+  server.registerTool(
+    "generate_image",
+    {
+      description:
+        "Send a generation or edit request to the selected image provider and record its result in the preview gallery. This may incur API cost when the plan says so; it never saves, imports, or applies the result.",
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: false,
+        openWorldHint: true,
+      },
+      inputSchema: {
+        name: z.string().min(1).max(80),
+        mode: imageGenerationModeSchema,
+        prompt: z.string().min(1).max(2000),
+        referenceIds: z.array(z.string().min(1)).max(8).default([]),
+        size: imageSizeSchema.default({ width: 512, height: 512 }),
+        transparentBackground: z.boolean().default(false),
+        seed: z.number().int().nonnegative().optional(),
+        confirmApiCost: z
+          .boolean()
+          .default(false)
+          .describe(
+            "Set true only after the user explicitly accepts that the selected provider may bill their API account.",
+          ),
+      },
+    },
+    async ({ name, confirmApiCost, ...request }) => {
+      const plan = planImageGeneration(
+        request,
+        references,
+        await detectImageProviders(imageProbes),
+      );
+      if (plan.incursApiCost && !confirmApiCost)
+        throw new Error(
+          `Provider ${plan.providerId} may bill the user's API account. Ask for confirmation, then call again with confirmApiCost true.`,
+        );
+      const startedAt = Date.now();
+      const generated = await dispatchImageGeneration(
+        plan,
+        references,
+        imageDispatch,
+      );
+      return jsonContent(
+        variants.add({
+          name,
+          mode: plan.mode,
+          prompt: plan.prompt,
+          providerId: plan.providerId!,
+          mimeType: generated.mimeType,
+          dataBase64: generated.dataBase64,
+          width: generated.width,
+          height: generated.height,
+          requestId: plan.requestId,
+          ...((generated.seed ?? plan.seed) === undefined
+            ? {}
+            : { seed: generated.seed ?? plan.seed }),
+          generationMs: Date.now() - startedAt,
+        }),
+      );
+    },
+  );
+
+  server.registerTool(
+    "list_image_variants",
+    {
+      description:
+        "List generated variants newest first with their prompt, provider, dimensions, alpha, and favorite state. Image payloads are not returned.",
+      annotations: readOnlyAnnotations,
+    },
+    () => jsonContent({ variants: variants.list() }),
+  );
+
+  server.registerTool(
+    "inspect_image_transparency",
+    {
+      description:
+        "Decode a generated variant and report actual transparent, translucent, and opaque pixel counts. An opaque painted checkerboard remains opaque.",
+      annotations: readOnlyAnnotations,
+      inputSchema: { variantId: z.string().min(1) },
+    },
+    async ({ variantId }) =>
+      jsonContent(
+        await inspectImageAlpha(
+          Buffer.from(variants.payload(variantId), "base64"),
+        ),
+      ),
+  );
+
+  server.registerTool(
+    "convert_image_to_pixel_art",
+    {
+      description:
+        "Create a new PNG variant using nearest-neighbor scaling and either a bounded or exact manual palette. The original remains unchanged.",
+      annotations: draftAnnotations,
+      inputSchema: {
+        variantId: z.string().min(1),
+        name: z.string().min(1).max(80).optional(),
+        ...pixelArtConversionSchema.shape,
+      },
+    },
+    async ({ variantId, name, ...options }) => {
+      const source = variants.get(variantId);
+      const converted = await convertToPixelArt(
+        Buffer.from(variants.payload(variantId), "base64"),
+        options,
+      );
+      const inspection = await inspectImageAlpha(converted);
+      const variant = variants.add({
+        name: name ?? `${source.name} ${options.width}x${options.height}`,
+        mode: "pixel-art-conversion",
+        prompt: `${source.prompt} Converted with nearest-neighbor scaling and ${options.manualPalette?.length ?? options.paletteColors} palette colors.`,
+        providerId: source.providerId,
+        mimeType: "image/png",
+        dataBase64: converted.toString("base64"),
+        width: options.width,
+        height: options.height,
+        ...(source.seed === undefined ? {} : { seed: source.seed }),
+      });
+      return jsonContent({ variant, transparency: inspection });
+    },
+  );
+
+  server.registerTool(
+    "use_variant_as_reference",
+    {
+      description:
+        "Attach an existing generated variant as a named reference for a follow-up request.",
+      annotations: draftAnnotations,
+      inputSchema: {
+        variantId: z.string().min(1),
+        role: imageReferenceRoleSchema,
+        name: z.string().min(1).max(80).optional(),
+      },
+    },
+    ({ variantId, role, name }) => {
+      const variant = variants.get(variantId);
+      return jsonContent(
+        references.add({
+          name: name ?? variant.name,
+          source: "generated-variant",
+          role,
+          mimeType: variant.mimeType,
+          dataBase64: variants.payload(variantId),
+          width: variant.width,
+          height: variant.height,
+        }),
+      );
+    },
+  );
+
+  server.registerTool(
+    "get_texture_destination",
+    {
+      description:
+        "Report the remembered texture folder for the active project, whether it is writable, and suggested Minecraft folders.",
+      annotations: probeAnnotations,
+    },
+    () => {
+      const project = requireSnapshot(store).project;
+      return jsonContent(destinations.status(project.id, project.filePath));
+    },
+  );
+
+  server.registerTool(
+    "set_texture_destination",
+    {
+      description:
+        "Remember an absolute texture folder for the active project. Existing files are never overwritten by later saves.",
+      annotations: draftAnnotations,
+      inputSchema: {
+        absolutePath: z.string().min(1),
+        create: z.boolean().default(false),
+      },
+    },
+    ({ absolutePath, create }) => {
+      const project = requireSnapshot(store).project;
+      return jsonContent(
+        destinations.set(project.id, absolutePath, {
+          create,
+          ...(project.filePath === undefined
+            ? {}
+            : { projectFilePath: project.filePath }),
+        }),
+      );
+    },
+  );
+
+  server.registerTool(
+    "save_image_variant",
+    {
+      description:
+        "Write a generated variant into the remembered texture folder with a sanitized, unique file name. Nothing is overwritten and nothing is imported into Blockbench.",
+      annotations: draftAnnotations,
+      inputSchema: {
+        variantId: z.string().min(1),
+        fileName: z.string().min(1).max(80).optional(),
+      },
+    },
+    ({ variantId, fileName }) => {
+      const project = requireSnapshot(store).project;
+      const variant = variants.get(variantId);
+      return jsonContent(
+        destinations.save({
+          projectId: project.id,
+          projectFilePath: project.filePath,
+          fileName: fileName ?? variant.name,
+          bytes: Buffer.from(variants.payload(variantId), "base64"),
+          provenance: {
+            variantId: variant.id,
+            prompt: variant.prompt,
+            mode: variant.mode,
+            provider: variant.providerId,
+            ...(variant.seed === undefined ? {} : { seed: variant.seed }),
+            width: variant.width,
+            height: variant.height,
+          },
+        }),
+      );
+    },
+  );
+
+  server.registerTool(
+    "import_image_variant",
+    {
+      description:
+        "Safely save a variant, then queue a typed Blockbench command to import it as a new texture and optionally apply it to the currently selected cubes in one Undo entry.",
+      annotations: draftAnnotations,
+      inputSchema: {
+        variantId: z.string().min(1),
+        fileName: z.string().min(1).max(80).optional(),
+        applyToSelection: z.boolean().default(false),
+      },
+    },
+    ({ variantId, fileName, applyToSelection }) => {
+      const snapshot = requireSnapshot(store);
+      const variant = variants.get(variantId);
+      const targets = applyToSelection ? snapshot.selection : [];
+      if (applyToSelection && targets.length === 0)
+        throw new Error(
+          "Select at least one cube before applying the texture.",
+        );
+      const saved = destinations.save({
+        projectId: snapshot.project.id,
+        projectFilePath: snapshot.project.filePath,
+        fileName: fileName ?? variant.name,
+        bytes: Buffer.from(variants.payload(variantId), "base64"),
+        provenance: {
+          variantId: variant.id,
+          prompt: variant.prompt,
+          mode: variant.mode,
+          provider: variant.providerId,
+          ...(variant.seed === undefined ? {} : { seed: variant.seed }),
+          width: variant.width,
+          height: variant.height,
+        },
+      });
+      return jsonContent({
+        saved,
+        command: drafts.importTexture(snapshot, {
+          label: applyToSelection
+            ? "Import and apply generated texture"
+            : "Import generated texture",
+          absolutePath: saved.absolutePath,
+          textureName: saved.fileName,
+          applyElementIds: targets,
+        }),
+      });
     },
   );
 

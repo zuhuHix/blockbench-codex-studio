@@ -3,6 +3,13 @@ import type { captureSnapshot } from "./snapshot.js";
 import type {
   BridgeCommand,
   CommandAcknowledgement,
+  ImageReference,
+  ImageReferenceRole,
+  ImageVariant,
+  ImageAlphaInspection,
+  PixelArtConversion,
+  SavedTexture,
+  TextureDestination,
 } from "@blockbench-codex/contracts";
 
 export interface BridgeSettings {
@@ -158,4 +165,154 @@ export async function publishSnapshot(
   snapshot: Snapshot,
 ): Promise<void> {
   await requestJson(settings, "/bridge/snapshot", "POST", snapshot);
+}
+
+export async function fetchImageVariants(
+  settings: BridgeSettings,
+): Promise<readonly ImageVariant[]> {
+  const result = await requestJson<{ variants: ImageVariant[] }>(
+    settings,
+    "/bridge/image-variants",
+    "GET",
+  );
+  return result.variants;
+}
+
+/** Returns a data URL, because the panel cannot send a bearer header on img. */
+export async function fetchVariantDataUrl(
+  settings: BridgeSettings,
+  variantId: string,
+): Promise<string> {
+  const result = await requestJson<{
+    variant: ImageVariant;
+    dataBase64: string;
+  }>(settings, `/bridge/image-variants/${variantId}`, "GET");
+  return `data:${result.variant.mimeType};base64,${result.dataBase64}`;
+}
+
+export function setVariantFavorite(
+  settings: BridgeSettings,
+  variantId: string,
+  favorite: boolean,
+): Promise<ImageVariant> {
+  return requestJson(
+    settings,
+    `/bridge/image-variants/${variantId}/favorite`,
+    "POST",
+    { favorite },
+  );
+}
+
+export function removeVariant(
+  settings: BridgeSettings,
+  variantId: string,
+): Promise<ImageVariant> {
+  return requestJson(
+    settings,
+    `/bridge/image-variants/${variantId}/remove`,
+    "POST",
+    {},
+  );
+}
+
+export function attachVariantAsReference(
+  settings: BridgeSettings,
+  variantId: string,
+  role: ImageReferenceRole,
+): Promise<ImageReference> {
+  return requestJson(
+    settings,
+    `/bridge/image-variants/${variantId}/reference`,
+    "POST",
+    { role },
+  );
+}
+
+export async function fetchImageReferences(
+  settings: BridgeSettings,
+): Promise<readonly ImageReference[]> {
+  const result = await requestJson<{ references: ImageReference[] }>(
+    settings,
+    "/bridge/image-references",
+    "GET",
+  );
+  return result.references;
+}
+
+export function fetchTextureDestination(
+  settings: BridgeSettings,
+): Promise<TextureDestination> {
+  return requestJson(settings, "/bridge/texture-destination", "GET");
+}
+
+export function setTextureDestination(
+  settings: BridgeSettings,
+  absolutePath: string,
+  create = false,
+): Promise<TextureDestination> {
+  return requestJson(settings, "/bridge/texture-destination", "POST", {
+    absolutePath,
+    create,
+  });
+}
+
+export function revealTextureDestination(
+  settings: BridgeSettings,
+): Promise<{ revealed: string }> {
+  return requestJson(
+    settings,
+    "/bridge/texture-destination/reveal",
+    "POST",
+    {},
+  );
+}
+
+export function saveVariant(
+  settings: BridgeSettings,
+  variantId: string,
+  fileName?: string,
+): Promise<SavedTexture> {
+  return requestJson(
+    settings,
+    `/bridge/image-variants/${variantId}/save`,
+    "POST",
+    fileName === undefined ? {} : { fileName },
+  );
+}
+
+export function inspectVariantTransparency(
+  settings: BridgeSettings,
+  variantId: string,
+): Promise<ImageAlphaInspection> {
+  return requestJson(
+    settings,
+    `/bridge/image-variants/${variantId}/transparency`,
+    "GET",
+  );
+}
+
+export function convertVariant(
+  settings: BridgeSettings,
+  variantId: string,
+  options: PixelArtConversion,
+): Promise<ImageVariant> {
+  return requestJson(
+    settings,
+    `/bridge/image-variants/${variantId}/convert`,
+    "POST",
+    options,
+  );
+}
+
+export function importVariant(
+  settings: BridgeSettings,
+  variantId: string,
+  applyToSelection: boolean,
+): Promise<{ readonly saved: SavedTexture; readonly command: BridgeCommand }> {
+  return requestJson(
+    settings,
+    `/bridge/image-variants/${variantId}/import`,
+    "POST",
+    { applyToSelection },
+  );
 }

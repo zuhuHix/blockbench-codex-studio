@@ -60,12 +60,18 @@ declare const MenuBar: {
 declare const Blockbench: {
   showQuickMessage(message: string, duration?: number): void;
   addCSS(css: string): { delete(): void };
+  pickDirectory?(options: {
+    readonly title?: string;
+    readonly startpath?: string;
+    readonly resource_id?: string;
+  }): string | undefined;
 };
 declare const Project:
   | {
       readonly uuid?: string;
       readonly name?: string;
       readonly format?: { readonly id?: string };
+      readonly save_path?: string;
       readonly texture_width?: number;
       readonly texture_height?: number;
     }
@@ -75,13 +81,31 @@ declare const Cube: {
   readonly selected: readonly BlockbenchNode[];
 };
 declare const Undo: {
-  initEdit(options: { elements: readonly BlockbenchNode[] }): void;
+  initEdit(options: {
+    elements: readonly BlockbenchNode[];
+    textures?: readonly BlockbenchTexture[];
+  }): void;
   finishEdit(
     label: string,
-    options: { elements: readonly BlockbenchNode[] },
+    options: {
+      elements: readonly BlockbenchNode[];
+      textures?: readonly BlockbenchTexture[];
+    },
   ): void;
   cancelEdit(revert?: boolean): void;
   undo(): void;
+};
+interface BlockbenchTexture {
+  readonly uuid: string;
+  readonly name: string;
+  fromPath(path: string): BlockbenchTexture;
+  add(undo?: boolean): BlockbenchTexture;
+  select?(): BlockbenchTexture;
+  remove?(): void;
+}
+declare const Texture: {
+  new (options?: { readonly name?: string }): BlockbenchTexture;
+  readonly all: readonly BlockbenchTexture[];
 };
 declare const Canvas: {
   updateView(options: {

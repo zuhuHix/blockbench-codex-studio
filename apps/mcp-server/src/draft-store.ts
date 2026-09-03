@@ -3,6 +3,7 @@ import {
   applyDraftCommandSchema,
   setSelectionCommandSchema,
   undoCommandSchema,
+  importTextureCommandSchema,
   type BridgeCommand,
   draftSummarySchema,
   type ApplyDraftCommand,
@@ -11,6 +12,7 @@ import {
   type CubeFaceName,
   type CubeFaceUv,
   type DraftSummary,
+  type ElementId,
   type TransactionId,
 } from "@blockbench-codex/contracts";
 import { containsBounds, dimensions } from "@blockbench-codex/geometry";
@@ -271,6 +273,31 @@ export class DraftStore {
       commandId: randomUUID(),
       projectId: snapshot.project.id,
       action: "undo",
+    });
+    this.#commands.push(command);
+    return command;
+  }
+
+  importTexture(
+    snapshot: BlockbenchSnapshot,
+    input: {
+      readonly label: string;
+      readonly absolutePath: string;
+      readonly textureName: string;
+      readonly applyElementIds: readonly ElementId[];
+    },
+  ): BridgeCommand {
+    const available = new Set(snapshot.elements.map((element) => element.id));
+    const applyElementIds = [...new Set(input.applyElementIds)];
+    const missing = applyElementIds.filter((id) => !available.has(id));
+    if (missing.length)
+      throw new Error(`Texture targets unknown cubes: ${missing.join(", ")}.`);
+    const command = importTextureCommandSchema.parse({
+      commandId: randomUUID(),
+      projectId: snapshot.project.id,
+      action: "import_texture",
+      ...input,
+      applyElementIds,
     });
     this.#commands.push(command);
     return command;

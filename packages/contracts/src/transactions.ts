@@ -60,10 +60,21 @@ export const undoCommandSchema = z.object({
   action: z.literal("undo"),
 });
 
+export const importTextureCommandSchema = z.object({
+  commandId: z.string().uuid(),
+  projectId: z.string().min(1),
+  action: z.literal("import_texture"),
+  label: z.string().min(1),
+  absolutePath: z.string().min(1),
+  textureName: z.string().min(1),
+  applyElementIds: z.array(elementIdSchema),
+});
+
 export const bridgeCommandSchema = z.union([
   applyDraftCommandSchema,
   setSelectionCommandSchema,
   undoCommandSchema,
+  importTextureCommandSchema,
 ]);
 
 export const commandAcknowledgementSchema = z.object({
@@ -80,6 +91,7 @@ export type TransactionId = z.infer<typeof transactionIdSchema>;
 export type ApplyDraftCommand = z.infer<typeof applyDraftCommandSchema>;
 export type SetSelectionCommand = z.infer<typeof setSelectionCommandSchema>;
 export type UndoCommand = z.infer<typeof undoCommandSchema>;
+export type ImportTextureCommand = z.infer<typeof importTextureCommandSchema>;
 export type BridgeCommand = z.infer<typeof bridgeCommandSchema>;
 export type CommandAcknowledgement = z.infer<
   typeof commandAcknowledgementSchema
