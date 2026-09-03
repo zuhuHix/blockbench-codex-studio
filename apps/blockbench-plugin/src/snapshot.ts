@@ -61,6 +61,31 @@ function serializeFaces(cube: BlockbenchNode) {
   );
 }
 
+/**
+ * Textures big enough to bloat every snapshot ship without pixels; the server
+ * then tells the model that texture cannot be read or painted through the
+ * bridge instead of silently painting the wrong thing.
+ */
+const maximumPublishedTexturePixels = 1024 * 1024;
+
+function serializeTexture(texture: BlockbenchTexture) {
+  const width = texture.width ?? texture.uv_width;
+  const height = texture.height ?? texture.uv_height;
+  if (width === undefined || height === undefined) return undefined;
+  const base64 =
+    texture.getBase64?.() ??
+    /^data:image\/png;base64,(.+)$/s.exec(texture.source ?? "")?.[1];
+  return {
+    id: texture.uuid,
+    name: texture.name,
+    width,
+    height,
+    ...(base64 === undefined || width * height > maximumPublishedTexturePixels
+      ? {}
+      : { dataBase64: base64 }),
+  };
+}
+
 /** Kept in line with the plugin manifest version in `index.ts`. */
 export const pluginVersion = "0.2.0";
 
@@ -110,6 +135,12 @@ export function captureSnapshot(viewport?: ViewportSnapshot) {
           ? {}
           : { faces: serializeFaces(cube) }),
       })),
+    textures: Texture.all
+      .map(serializeTexture)
+      .filter(
+        (texture): texture is NonNullable<typeof texture> =>
+          texture !== undefined,
+      ),
     ...(viewport === undefined ? {} : { viewport }),
     pluginVersion,
     ...(typeof Blockbench.version === "string" && Blockbench.version !== ""

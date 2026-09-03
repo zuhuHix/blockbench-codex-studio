@@ -1,11 +1,14 @@
 interface BlockbenchNode {
   readonly uuid: string;
-  readonly name: string;
+  name: string;
   readonly type?: string;
   readonly children?: readonly BlockbenchNode[];
   readonly parent?: BlockbenchNode | "root";
   from?: number[];
   to?: number[];
+  init?(): BlockbenchNode;
+  addTo?(parent: BlockbenchNode | undefined): BlockbenchNode;
+  remove?(): void;
   readonly rotation?: readonly [number, number, number];
   readonly visibility?: boolean;
   markAsSelected?(selectChildren?: boolean): BlockbenchNode;
@@ -78,21 +81,39 @@ declare const Project:
     }
   | undefined;
 declare const Cube: {
+  new (
+    data: {
+      readonly name?: string;
+      readonly from?: readonly number[];
+      readonly to?: readonly number[];
+      readonly rotation?: readonly number[];
+      readonly autouv?: 0 | 1 | 2;
+    },
+    uuid?: string,
+  ): BlockbenchNode;
   readonly all: readonly BlockbenchNode[];
   readonly selected: readonly BlockbenchNode[];
 };
-declare const Undo: {
-  initEdit(options: {
-    elements: readonly BlockbenchNode[];
-    textures?: readonly BlockbenchTexture[];
-  }): void;
-  finishEdit(
-    label: string,
-    options: {
-      elements: readonly BlockbenchNode[];
-      textures?: readonly BlockbenchTexture[];
+declare const Group: {
+  new (
+    data: {
+      readonly name?: string;
+      readonly origin?: readonly number[];
     },
-  ): void;
+    uuid?: string,
+  ): BlockbenchNode;
+  readonly all: readonly BlockbenchNode[];
+};
+interface UndoScope {
+  elements?: readonly BlockbenchNode[];
+  textures?: readonly BlockbenchTexture[];
+  outliner?: boolean;
+  selection?: boolean;
+  bitmap?: boolean;
+}
+declare const Undo: {
+  initEdit(options: UndoScope): void;
+  finishEdit(label: string, options: UndoScope): void;
   cancelEdit(revert?: boolean): void;
   undo(): void;
 };
@@ -101,6 +122,14 @@ interface BlockbenchTexture {
   readonly name: string;
   fromPath(path: string): BlockbenchTexture;
   add(undo?: boolean): BlockbenchTexture;
+  fromDataURL(dataUrl: string): BlockbenchTexture;
+  updateChangesAfterEdit?(): void;
+  getBase64?(): string;
+  readonly source?: string;
+  readonly width?: number;
+  readonly height?: number;
+  readonly uv_width?: number;
+  readonly uv_height?: number;
   select?(): BlockbenchTexture;
   remove?(): void;
 }
