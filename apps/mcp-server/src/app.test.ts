@@ -269,11 +269,15 @@ describe("studio HTTP app", () => {
         "remove_image_reference",
         "plan_image_generation",
         "record_image_variant",
+        "generate_image",
         "list_image_variants",
+        "inspect_image_transparency",
+        "convert_image_to_pixel_art",
         "use_variant_as_reference",
         "get_texture_destination",
         "set_texture_destination",
         "save_image_variant",
+        "import_image_variant",
       ]);
       expect(
         tools.tools.find((tool) => tool.name === "get_selection")?.annotations,

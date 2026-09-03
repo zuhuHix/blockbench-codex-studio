@@ -81,13 +81,31 @@ declare const Cube: {
   readonly selected: readonly BlockbenchNode[];
 };
 declare const Undo: {
-  initEdit(options: { elements: readonly BlockbenchNode[] }): void;
+  initEdit(options: {
+    elements: readonly BlockbenchNode[];
+    textures?: readonly BlockbenchTexture[];
+  }): void;
   finishEdit(
     label: string,
-    options: { elements: readonly BlockbenchNode[] },
+    options: {
+      elements: readonly BlockbenchNode[];
+      textures?: readonly BlockbenchTexture[];
+    },
   ): void;
   cancelEdit(revert?: boolean): void;
   undo(): void;
+};
+interface BlockbenchTexture {
+  readonly uuid: string;
+  readonly name: string;
+  fromPath(path: string): BlockbenchTexture;
+  add(undo?: boolean): BlockbenchTexture;
+  select?(): BlockbenchTexture;
+  remove?(): void;
+}
+declare const Texture: {
+  new (options?: { readonly name?: string }): BlockbenchTexture;
+  readonly all: readonly BlockbenchTexture[];
 };
 declare const Canvas: {
   updateView(options: {

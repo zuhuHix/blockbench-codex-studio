@@ -45,11 +45,14 @@ describe("image provider detection", () => {
     expect(codex.detail).toContain("BLOCKBENCH_CODEX_NATIVE_IMAGES");
   });
 
-  it("enables Codex-native generation only with the explicit opt-in", async () => {
+  it("enables Codex-native generation only with opt-in and an adapter", async () => {
     const report = await detectImageProviders(
       probes({
         codexInstalled: () => true,
-        env: { BLOCKBENCH_CODEX_NATIVE_IMAGES: "1" },
+        env: {
+          BLOCKBENCH_CODEX_NATIVE_IMAGES: "1",
+          BLOCKBENCH_CODEX_NATIVE_IMAGE_COMMAND: "C:\\tools\\image-adapter.exe",
+        },
       }),
     );
     expect(report.selectedProviderId).toBe("codex-native");
@@ -85,6 +88,7 @@ describe("image provider detection", () => {
         env: {
           OPENAI_API_KEY: "sk-secret-value",
           BLOCKBENCH_CODEX_COMFYUI_URL: "http://127.0.0.1:9000",
+          BLOCKBENCH_CODEX_COMFYUI_WORKFLOW: "C:\\workflows\\texture.json",
         },
         comfyUiReachable: (baseUrl) => {
           seen.push(baseUrl);

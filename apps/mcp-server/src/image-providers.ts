@@ -75,13 +75,16 @@ function detectCodexNative(probes: ImageProviderProbes): ImageProviderStatus {
       credentialSource: "none",
       incursApiCost: false,
     };
-  if (!isEnabled(probes.env.BLOCKBENCH_CODEX_NATIVE_IMAGES))
+  if (
+    !isEnabled(probes.env.BLOCKBENCH_CODEX_NATIVE_IMAGES) ||
+    !probes.env.BLOCKBENCH_CODEX_NATIVE_IMAGE_COMMAND?.trim()
+  )
     return {
       id: "codex-native",
       label,
       available: false,
       detail:
-        "A Codex or ChatGPT login does not by itself grant image generation. Set BLOCKBENCH_CODEX_NATIVE_IMAGES=1 once the active Codex session is confirmed to expose it.",
+        "A Codex or ChatGPT login does not by itself grant image generation. Enable BLOCKBENCH_CODEX_NATIVE_IMAGES and configure the approved BLOCKBENCH_CODEX_NATIVE_IMAGE_COMMAND adapter.",
       credentialSource: "none",
       incursApiCost: false,
     };
@@ -136,12 +139,14 @@ async function detectComfyUi(
 ): Promise<ImageProviderStatus> {
   const label = "Local ComfyUI";
   const baseUrl = probes.env.BLOCKBENCH_CODEX_COMFYUI_URL ?? defaultComfyUiUrl;
-  if (await probes.comfyUiReachable(baseUrl))
+  const reachable = await probes.comfyUiReachable(baseUrl);
+  const workflow = probes.env.BLOCKBENCH_CODEX_COMFYUI_WORKFLOW?.trim();
+  if (reachable && workflow)
     return {
       id: "comfyui",
       label,
       available: true,
-      detail: `A local ComfyUI instance answered at ${baseUrl}. Generation runs on this machine at no API cost.`,
+      detail: `A local ComfyUI instance answered at ${baseUrl} and an API-format workflow is configured. Generation runs on this machine at no API cost.`,
       credentialSource: "local-service",
       incursApiCost: false,
     };
@@ -149,7 +154,9 @@ async function detectComfyUi(
     id: "comfyui",
     label,
     available: false,
-    detail: `No ComfyUI instance answered at ${baseUrl}. Set BLOCKBENCH_CODEX_COMFYUI_URL to use another address.`,
+    detail: reachable
+      ? "ComfyUI is reachable, but BLOCKBENCH_CODEX_COMFYUI_WORKFLOW does not name an API-format workflow JSON file."
+      : `No ComfyUI instance answered at ${baseUrl}. Set BLOCKBENCH_CODEX_COMFYUI_URL to use another address.`,
     credentialSource: "none",
     incursApiCost: false,
   };

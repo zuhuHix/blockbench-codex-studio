@@ -5,6 +5,7 @@ import {
   blockbenchSnapshotSchema,
   commandAcknowledgementSchema,
   imageReferenceRoleSchema,
+  pixelArtConversionSchema,
 } from "@blockbench-codex/contracts";
 import type { Express } from "express";
 import { z } from "zod";
@@ -23,6 +24,7 @@ import { ReferenceStore } from "./reference-store.js";
 import { VariantStore } from "./variant-store.js";
 import { TextureDestinationStore } from "./texture-destinations.js";
 import { revealInFileManager } from "./reveal.js";
+import { convertToPixelArt, inspectImageAlpha } from "./image-conversion.js";
 
 const chatMessageSchema = z.object({
   prompt: z.string(),
@@ -317,6 +319,129 @@ export function createStudioApp(
     },
   );
 
+  app.get(
+    "/bridge/image-variants/:id/transparency",
+    authenticate,
+    (request, response) => {
+      try {
+        const bytes = Buffer.from(
+          variants.payload(String(request.params.id)),
+          "base64",
+        );
+        void inspectImageAlpha(bytes).then(
+          (inspection) => response.json(inspection),
+          (error: unknown) =>
+            response.status(400).json({
+              error:
+                error instanceof Error ? error.message : "Inspection failed.",
+            }),
+        );
+      } catch (error) {
+        response.status(404).json({
+          error: error instanceof Error ? error.message : "Variant not found.",
+        });
+      }
+    },
+  );
+
+  app.post(
+    "/bridge/image-variants/:id/convert",
+    authenticate,
+    (request, response) => {
+      const parsed = pixelArtConversionSchema.safeParse(request.body);
+      if (!parsed.success) {
+        response.status(400).json({ error: "Invalid conversion options." });
+        return;
+      }
+      try {
+        const source = variants.get(String(request.params.id));
+        void convertToPixelArt(
+          Buffer.from(variants.payload(source.id), "base64"),
+          parsed.data,
+        ).then(
+          (converted) =>
+            response.status(201).json(
+              variants.add({
+                name: `${source.name} ${parsed.data.width}x${parsed.data.height}`,
+                mode: "pixel-art-conversion",
+                prompt: `${source.prompt} Converted with nearest-neighbor scaling and ${parsed.data.manualPalette?.length ?? parsed.data.paletteColors} palette colors.`,
+                providerId: source.providerId,
+                mimeType: "image/png",
+                dataBase64: converted.toString("base64"),
+                width: parsed.data.width,
+                height: parsed.data.height,
+                ...(source.seed === undefined ? {} : { seed: source.seed }),
+              }),
+            ),
+          (error: unknown) =>
+            response.status(400).json({
+              error:
+                error instanceof Error ? error.message : "Conversion failed.",
+            }),
+        );
+      } catch (error) {
+        response.status(404).json({
+          error: error instanceof Error ? error.message : "Variant not found.",
+        });
+      }
+    },
+  );
+
+  app.post(
+    "/bridge/image-variants/:id/import",
+    authenticate,
+    (request, response) => {
+      const body = request.body as {
+        fileName?: unknown;
+        applyToSelection?: unknown;
+      };
+      try {
+        const snapshot = store.get();
+        if (snapshot === undefined)
+          throw new Error("Blockbench has not published a project yet.");
+        const applyToSelection = body.applyToSelection === true;
+        if (applyToSelection && snapshot.selection.length === 0)
+          throw new Error(
+            "Select at least one cube before applying the texture.",
+          );
+        const variant = variants.get(String(request.params.id));
+        const saved = destinations.save({
+          projectId: snapshot.project.id,
+          projectFilePath: snapshot.project.filePath,
+          fileName:
+            typeof body.fileName === "string" && body.fileName.trim()
+              ? body.fileName
+              : variant.name,
+          bytes: Buffer.from(variants.payload(variant.id), "base64"),
+          provenance: {
+            variantId: variant.id,
+            prompt: variant.prompt,
+            mode: variant.mode,
+            provider: variant.providerId,
+            ...(variant.seed === undefined ? {} : { seed: variant.seed }),
+            width: variant.width,
+            height: variant.height,
+          },
+        });
+        response.status(202).json({
+          saved,
+          command: drafts.importTexture(snapshot, {
+            label: applyToSelection
+              ? "Import and apply generated texture"
+              : "Import generated texture",
+            absolutePath: saved.absolutePath,
+            textureName: saved.fileName,
+            applyElementIds: applyToSelection ? snapshot.selection : [],
+          }),
+        });
+      } catch (error) {
+        response.status(400).json({
+          error: error instanceof Error ? error.message : "Import failed.",
+        });
+      }
+    },
+  );
+
   app.post("/bridge/snapshot", authenticate, (request, response) => {
     const parsed = blockbenchSnapshotSchema.safeParse(request.body);
     if (!parsed.success) {
@@ -351,6 +476,7 @@ export function createStudioApp(
       imageProbes,
       references,
       variants,
+      destinations,
     );
     const transport = new StreamableHTTPServerTransport({
       sessionIdGenerator: undefined,

@@ -10,8 +10,14 @@ import {
 } from "./image-providers.js";
 import { ReferenceStore } from "./reference-store.js";
 import { planImageGeneration } from "./image-requests.js";
+import {
+  defaultImageDispatchDependencies,
+  dispatchImageGeneration,
+  type ImageDispatchDependencies,
+} from "./image-dispatch.js";
 import { VariantStore } from "./variant-store.js";
 import { TextureDestinationStore } from "./texture-destinations.js";
+import { convertToPixelArt, inspectImageAlpha } from "./image-conversion.js";
 import {
   bounds3Schema,
   cubeFaceNameSchema,
@@ -22,6 +28,7 @@ import {
   imageReferenceRoleSchema,
   imageReferenceSourceSchema,
   imageSizeSchema,
+  pixelArtConversionSchema,
   transactionIdSchema,
 } from "@blockbench-codex/contracts";
 import { z } from "zod";
@@ -93,6 +100,7 @@ export function createMcpServer(
   references = new ReferenceStore(),
   variants = new VariantStore(),
   destinations = new TextureDestinationStore(),
+  imageDispatch: ImageDispatchDependencies = defaultImageDispatchDependencies,
 ): McpServer {
   const server = new McpServer({
     name: "blockbench-codex-studio",
@@ -680,6 +688,69 @@ export function createMcpServer(
   );
 
   server.registerTool(
+    "generate_image",
+    {
+      description:
+        "Send a generation or edit request to the selected image provider and record its result in the preview gallery. This may incur API cost when the plan says so; it never saves, imports, or applies the result.",
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: false,
+        openWorldHint: true,
+      },
+      inputSchema: {
+        name: z.string().min(1).max(80),
+        mode: imageGenerationModeSchema,
+        prompt: z.string().min(1).max(2000),
+        referenceIds: z.array(z.string().min(1)).max(8).default([]),
+        size: imageSizeSchema.default({ width: 512, height: 512 }),
+        transparentBackground: z.boolean().default(false),
+        seed: z.number().int().nonnegative().optional(),
+        confirmApiCost: z
+          .boolean()
+          .default(false)
+          .describe(
+            "Set true only after the user explicitly accepts that the selected provider may bill their API account.",
+          ),
+      },
+    },
+    async ({ name, confirmApiCost, ...request }) => {
+      const plan = planImageGeneration(
+        request,
+        references,
+        await detectImageProviders(imageProbes),
+      );
+      if (plan.incursApiCost && !confirmApiCost)
+        throw new Error(
+          `Provider ${plan.providerId} may bill the user's API account. Ask for confirmation, then call again with confirmApiCost true.`,
+        );
+      const startedAt = Date.now();
+      const generated = await dispatchImageGeneration(
+        plan,
+        references,
+        imageDispatch,
+      );
+      return jsonContent(
+        variants.add({
+          name,
+          mode: plan.mode,
+          prompt: plan.prompt,
+          providerId: plan.providerId!,
+          mimeType: generated.mimeType,
+          dataBase64: generated.dataBase64,
+          width: generated.width,
+          height: generated.height,
+          requestId: plan.requestId,
+          ...((generated.seed ?? plan.seed) === undefined
+            ? {}
+            : { seed: generated.seed ?? plan.seed }),
+          generationMs: Date.now() - startedAt,
+        }),
+      );
+    },
+  );
+
+  server.registerTool(
     "list_image_variants",
     {
       description:
@@ -687,6 +758,56 @@ export function createMcpServer(
       annotations: readOnlyAnnotations,
     },
     () => jsonContent({ variants: variants.list() }),
+  );
+
+  server.registerTool(
+    "inspect_image_transparency",
+    {
+      description:
+        "Decode a generated variant and report actual transparent, translucent, and opaque pixel counts. An opaque painted checkerboard remains opaque.",
+      annotations: readOnlyAnnotations,
+      inputSchema: { variantId: z.string().min(1) },
+    },
+    async ({ variantId }) =>
+      jsonContent(
+        await inspectImageAlpha(
+          Buffer.from(variants.payload(variantId), "base64"),
+        ),
+      ),
+  );
+
+  server.registerTool(
+    "convert_image_to_pixel_art",
+    {
+      description:
+        "Create a new PNG variant using nearest-neighbor scaling and either a bounded or exact manual palette. The original remains unchanged.",
+      annotations: draftAnnotations,
+      inputSchema: {
+        variantId: z.string().min(1),
+        name: z.string().min(1).max(80).optional(),
+        ...pixelArtConversionSchema.shape,
+      },
+    },
+    async ({ variantId, name, ...options }) => {
+      const source = variants.get(variantId);
+      const converted = await convertToPixelArt(
+        Buffer.from(variants.payload(variantId), "base64"),
+        options,
+      );
+      const inspection = await inspectImageAlpha(converted);
+      const variant = variants.add({
+        name: name ?? `${source.name} ${options.width}x${options.height}`,
+        mode: "pixel-art-conversion",
+        prompt: `${source.prompt} Converted with nearest-neighbor scaling and ${options.manualPalette?.length ?? options.paletteColors} palette colors.`,
+        providerId: source.providerId,
+        mimeType: "image/png",
+        dataBase64: converted.toString("base64"),
+        width: options.width,
+        height: options.height,
+        ...(source.seed === undefined ? {} : { seed: source.seed }),
+      });
+      return jsonContent({ variant, transparency: inspection });
+    },
   );
 
   server.registerTool(
@@ -785,6 +906,55 @@ export function createMcpServer(
           },
         }),
       );
+    },
+  );
+
+  server.registerTool(
+    "import_image_variant",
+    {
+      description:
+        "Safely save a variant, then queue a typed Blockbench command to import it as a new texture and optionally apply it to the currently selected cubes in one Undo entry.",
+      annotations: draftAnnotations,
+      inputSchema: {
+        variantId: z.string().min(1),
+        fileName: z.string().min(1).max(80).optional(),
+        applyToSelection: z.boolean().default(false),
+      },
+    },
+    ({ variantId, fileName, applyToSelection }) => {
+      const snapshot = requireSnapshot(store);
+      const variant = variants.get(variantId);
+      const targets = applyToSelection ? snapshot.selection : [];
+      if (applyToSelection && targets.length === 0)
+        throw new Error(
+          "Select at least one cube before applying the texture.",
+        );
+      const saved = destinations.save({
+        projectId: snapshot.project.id,
+        projectFilePath: snapshot.project.filePath,
+        fileName: fileName ?? variant.name,
+        bytes: Buffer.from(variants.payload(variantId), "base64"),
+        provenance: {
+          variantId: variant.id,
+          prompt: variant.prompt,
+          mode: variant.mode,
+          provider: variant.providerId,
+          ...(variant.seed === undefined ? {} : { seed: variant.seed }),
+          width: variant.width,
+          height: variant.height,
+        },
+      });
+      return jsonContent({
+        saved,
+        command: drafts.importTexture(snapshot, {
+          label: applyToSelection
+            ? "Import and apply generated texture"
+            : "Import generated texture",
+          absolutePath: saved.absolutePath,
+          textureName: saved.fileName,
+          applyElementIds: targets,
+        }),
+      });
     },
   );
 

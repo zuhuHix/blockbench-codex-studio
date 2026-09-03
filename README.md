@@ -20,6 +20,7 @@ Read [BLOCKBENCH_CODEX_MCP_MASTER_BLUEPRINT.md](docs/BLOCKBENCH_CODEX_MCP_MASTER
 - First Phase 3 semantic path added: infer the selected anchor, arrange same-group cubes into a physically overlapping chain, enforce project bounds, and publish a post-commit viewport capture
 - Phase 4 UV path added: publish all six faces, stage direct or continuous mappings, audit unique coverage and seams, pack islands, normalize texel density, and commit UV changes through the same one-step Undo transaction
 - Phase 4 textured fixture accepted end to end in Blockbench: 12 seams repaired to zero, unique coverage increased from 37.5% to 42.72%, and one native Undo restored all 18 face mappings exactly
+- Phase 5 image workspace implemented: provider dispatch, named references, preview gallery, safe destinations, nearest-neighbor pixel conversion, real-alpha inspection, and typed texture import/apply through native Undo
 - Native keyboard-first assistant panel added with preview-first and direct-apply modes, viewport context, model selection, stop, copy, and Undo controls
 - Specimen fixture accepted end to end in Blockbench 5.1.6, including exact one-step Undo restoration
 - Clean checkout formatting, lint, test, and build gate established

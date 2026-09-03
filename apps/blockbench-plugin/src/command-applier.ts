@@ -4,8 +4,42 @@ import { serializeFace } from "./snapshot.js";
 export function applyCommand(command: BridgeCommand): void {
   if ((Project?.uuid ?? Project?.name) !== command.projectId)
     throw new Error("Command targets a different Blockbench project.");
-  if ("action" in command) {
+  if ("action" in command && command.action === "undo") {
     Undo.undo();
+    return;
+  }
+  if ("action" in command && command.action === "import_texture") {
+    const elements = command.applyElementIds.map((elementId) => {
+      const cube = Cube.all.find((candidate) => candidate.uuid === elementId);
+      if (cube === undefined)
+        throw new Error(`Cube ${elementId} is unavailable for texture apply.`);
+      return cube;
+    });
+    const beforeTextures = [...Texture.all];
+    Undo.initEdit({ elements, textures: beforeTextures });
+    let texture: BlockbenchTexture | undefined;
+    try {
+      texture = new Texture({ name: command.textureName })
+        .fromPath(command.absolutePath)
+        .add(false);
+      for (const cube of elements)
+        for (const face of Object.values(cube.faces ?? {}))
+          face.texture = texture.uuid;
+      texture.select?.();
+      Undo.finishEdit(command.label, {
+        elements,
+        textures: [...Texture.all],
+      });
+      if (elements.length)
+        Canvas.updateView({
+          elements,
+          element_aspects: { uv: true, faces: true },
+        });
+    } catch (error) {
+      texture?.remove?.();
+      Undo.cancelEdit(true);
+      throw error;
+    }
     return;
   }
   if ("elementIds" in command) {

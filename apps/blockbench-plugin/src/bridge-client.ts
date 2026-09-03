@@ -6,6 +6,8 @@ import type {
   ImageReference,
   ImageReferenceRole,
   ImageVariant,
+  ImageAlphaInspection,
+  PixelArtConversion,
   SavedTexture,
   TextureDestination,
 } from "@blockbench-codex/contracts";
@@ -275,5 +277,42 @@ export function saveVariant(
     `/bridge/image-variants/${variantId}/save`,
     "POST",
     fileName === undefined ? {} : { fileName },
+  );
+}
+
+export function inspectVariantTransparency(
+  settings: BridgeSettings,
+  variantId: string,
+): Promise<ImageAlphaInspection> {
+  return requestJson(
+    settings,
+    `/bridge/image-variants/${variantId}/transparency`,
+    "GET",
+  );
+}
+
+export function convertVariant(
+  settings: BridgeSettings,
+  variantId: string,
+  options: PixelArtConversion,
+): Promise<ImageVariant> {
+  return requestJson(
+    settings,
+    `/bridge/image-variants/${variantId}/convert`,
+    "POST",
+    options,
+  );
+}
+
+export function importVariant(
+  settings: BridgeSettings,
+  variantId: string,
+  applyToSelection: boolean,
+): Promise<{ readonly saved: SavedTexture; readonly command: BridgeCommand }> {
+  return requestJson(
+    settings,
+    `/bridge/image-variants/${variantId}/import`,
+    "POST",
+    { applyToSelection },
   );
 }

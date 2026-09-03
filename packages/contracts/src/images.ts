@@ -172,8 +172,32 @@ export const savedTextureSchema = z.object({
   savedAt: z.iso.datetime(),
 });
 
+export const imageAlphaInspectionSchema = z.object({
+  width: z.number().int().positive(),
+  height: z.number().int().positive(),
+  /** True only when decoded pixels contain at least one alpha value below 255. */
+  hasRealTransparency: z.boolean(),
+  transparentPixelCount: z.number().int().nonnegative(),
+  translucentPixelCount: z.number().int().nonnegative(),
+  opaquePixelCount: z.number().int().nonnegative(),
+});
+
+export const pixelArtConversionSchema = z.object({
+  width: z.number().int().min(1).max(2048),
+  height: z.number().int().min(1).max(2048),
+  paletteColors: z.number().int().min(2).max(256).default(32),
+  /** Optional exact RGB palette. Pixels map to the nearest listed color. */
+  manualPalette: z
+    .array(z.string().regex(/^#[0-9a-f]{6}$/iu))
+    .min(2)
+    .max(256)
+    .optional(),
+});
+
 export type TextureDestination = z.infer<typeof textureDestinationSchema>;
 export type SavedTexture = z.infer<typeof savedTextureSchema>;
+export type ImageAlphaInspection = z.infer<typeof imageAlphaInspectionSchema>;
+export type PixelArtConversion = z.infer<typeof pixelArtConversionSchema>;
 
 export type ImageReferenceSource = z.infer<typeof imageReferenceSourceSchema>;
 export type ImageReferenceRole = z.infer<typeof imageReferenceRoleSchema>;

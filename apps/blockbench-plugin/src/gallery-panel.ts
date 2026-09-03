@@ -6,6 +6,9 @@ import {
   fetchImageVariants,
   fetchVariantDataUrl,
   fetchTextureDestination,
+  inspectVariantTransparency,
+  convertVariant,
+  importVariant,
   removeVariant,
   revealTextureDestination,
   saveVariant,
@@ -58,6 +61,9 @@ export function createGalleryPanel(
           favoritesOnly: false,
           role: "style",
           destination: undefined as any,
+          conversionSize: 32,
+          paletteColors: 32,
+          transparency: {} as Record<string, any>,
           connected: false,
           poller: undefined as ReturnType<typeof setInterval> | undefined,
         };
@@ -259,6 +265,57 @@ export function createGalleryPanel(
             this.report(error);
           }
         },
+        async inspectAlpha(variant: any) {
+          const bridge = settings();
+          if (!bridge) return;
+          try {
+            this.$set(
+              this.transparency,
+              variant.id,
+              await inspectVariantTransparency(bridge, variant.id),
+            );
+          } catch (error) {
+            this.report(error);
+          }
+        },
+        async convert(variant: any) {
+          const bridge = settings();
+          if (!bridge) return;
+          try {
+            const converted = await convertVariant(bridge, variant.id, {
+              width: Number(this.conversionSize),
+              height: Number(this.conversionSize),
+              paletteColors: Number(this.paletteColors),
+            });
+            await this.refresh();
+            this.show(converted);
+            Blockbench.showQuickMessage(
+              `Created ${converted.width}×${converted.height} pixel-art variant.`,
+              2500,
+            );
+          } catch (error) {
+            this.report(error);
+          }
+        },
+        async queueImport(variant: any, applyToSelection: boolean) {
+          const bridge = settings();
+          if (!bridge) return;
+          try {
+            const result = await importVariant(
+              bridge,
+              variant.id,
+              applyToSelection,
+            );
+            Blockbench.showQuickMessage(
+              applyToSelection
+                ? `Importing ${result.saved.fileName} and applying it to the selection.`
+                : `Importing ${result.saved.fileName}.`,
+              3000,
+            );
+          } catch (error) {
+            this.report(error);
+          }
+        },
         report(error: unknown) {
           Blockbench.showQuickMessage(
             error instanceof Error ? error.message : String(error),
@@ -322,6 +379,7 @@ export function createGalleryPanel(
             <dl class="bcg-meta">
               <div><dt>Size</dt><dd>{{ open.width }}×{{ open.height }} · {{ open.mimeType }}</dd></div>
               <div><dt>Alpha</dt><dd>{{ open.hasAlphaChannel ? 'transparency channel present' : 'opaque' }}</dd></div>
+              <div v-if="transparency[open.id]"><dt>Real alpha</dt><dd>{{ transparency[open.id].hasRealTransparency ? (transparency[open.id].transparentPixelCount + transparency[open.id].translucentPixelCount) + ' non-opaque pixels' : 'none; image is fully opaque' }}</dd></div>
               <div><dt>Provider</dt><dd>{{ open.providerId }}</dd></div>
               <div><dt>Mode</dt><dd>{{ open.mode }}</dd></div>
               <div v-if="open.seed !== undefined"><dt>Seed</dt><dd>{{ open.seed }}</dd></div>
@@ -333,7 +391,13 @@ export function createGalleryPanel(
               <button @click="toggleFavorite(open)"><span class="material-icons">{{ open.favorite ? 'star' : 'star_border' }}</span>{{ open.favorite ? 'Favorited' : 'Favorite' }}</button>
               <select v-model="role" title="Reference role"><option v-for="entry in ${JSON.stringify(roles)}" :key="entry" :value="entry">{{ entry }}</option></select>
               <button @click="useAsReference(open)"><span class="material-icons">add_photo_alternate</span>Use as reference</button>
+              <button @click="inspectAlpha(open)"><span class="material-icons">opacity</span>Check alpha</button>
+              <select v-model.number="conversionSize" title="Pixel-art output size"><option v-for="size in [16,32,64,128]" :key="size" :value="size">{{ size }}×{{ size }}</option></select>
+              <select v-model.number="paletteColors" title="Maximum palette colors"><option v-for="count in [8,16,32,64]" :key="count" :value="count">{{ count }} colors</option></select>
+              <button @click="convert(open)"><span class="material-icons">filter_vintage</span>Pixel art</button>
               <button :disabled="!destination || !destination.writable" :title="destination &amp;&amp; destination.writable ? 'Save a PNG into the texture folder' : 'Choose a writable texture folder first'" @click="save(open)"><span class="material-icons">save_alt</span>Save PNG</button>
+              <button :disabled="!destination || !destination.writable" @click="queueImport(open,false)"><span class="material-icons">texture</span>Import</button>
+              <button :disabled="!destination || !destination.writable" @click="queueImport(open,true)"><span class="material-icons">format_paint</span>Import + apply</button>
               <button class="danger" @click="discard(open)"><span class="material-icons">delete_outline</span>Discard</button>
             </footer>
           </main>
