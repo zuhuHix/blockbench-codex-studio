@@ -202,7 +202,7 @@ Plugin.register("blockbench_codex_studio", {
   description:
     "Safe, typed Blockbench inspection and modeling through Codex MCP.",
   icon: "smart_toy",
-  version: "0.2.0",
+  version: "0.2.1",
   min_version: "5.0.0",
   variant: "desktop",
   onload() {

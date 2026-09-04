@@ -27,6 +27,56 @@ export interface AgentProvider {
 
 export const mcpServerName = "blockbench-codex-studio";
 
+/**
+ * Keep the interactive modeling context small enough for Codex to receive
+ * every operation it needs directly. Image-provider and gallery tools remain
+ * available to direct MCP clients, but do not crowd structural tools out of
+ * the embedded assistant catalogue.
+ */
+export const codexModelingTools = [
+  "health",
+  "get_project_summary",
+  "get_selection",
+  "list_outline",
+  "capture_viewport",
+  "capture_views",
+  "begin_draft",
+  "get_draft_summary",
+  "move_cube_preserve_size",
+  "create_group",
+  "create_cube",
+  "resize_cube",
+  "rename_cube",
+  "delete_cube",
+  "delete_group",
+  "set_group_origin",
+  "reparent_cube",
+  "validate_draft",
+  "commit_draft",
+  "discard_draft",
+  "undo",
+  "set_selection",
+  "inspect_connectivity",
+  "connect_selected_chain",
+  "get_cube_face_uvs",
+  "set_face_uv",
+  "project_connected_uv",
+  "measure_uv_coverage",
+  "audit_uv_seams",
+  "pack_uv_islands",
+  "normalize_texel_density",
+  "list_textures",
+  "describe_face_layout",
+  "read_texture_region",
+  "paint_texture_region",
+  "begin_refinement",
+  "get_refinement_report",
+  "refine_pass",
+  "check_refinement_draft",
+  "commit_refinement_draft",
+  "stop_refinement",
+] as const;
+
 function npmGlobalPackage(...segments: readonly string[]): string {
   const appData = process.env.APPDATA;
   if (appData === undefined) throw new Error("APPDATA is unavailable.");
@@ -65,6 +115,8 @@ const codexProvider: AgentProvider = {
       `mcp_servers.${mcpServerName}.url="http://127.0.0.1:${port}/mcp"`,
       "-c",
       `mcp_servers.${mcpServerName}.bearer_token_env_var="BLOCKBENCH_CODEX_TOKEN"`,
+      "-c",
+      `mcp_servers.${mcpServerName}.enabled_tools=${JSON.stringify(codexModelingTools)}`,
     ];
   },
 
