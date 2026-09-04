@@ -19,6 +19,7 @@ const previewKey = "blockbench_codex_preview_first";
 const detailsKey = "blockbench_codex_show_details";
 const refineKey = "blockbench_codex_auto_refine";
 const refinePassesKey = "blockbench_codex_refine_passes";
+const studioVersion = "0.2.1";
 
 /** Assistant messages longer than this collapse into an expandable section. */
 const longMessageLength = 700;
@@ -85,6 +86,7 @@ export function createAssistantPanel(
           providerId: localStorage.getItem(providerKey) ?? "codex",
           model: localStorage.getItem(modelKey) ?? "gpt-5.6-terra",
           effort: localStorage.getItem(effortKey) ?? "medium",
+          studioVersion,
           sessionId: "",
           events: [] as ChatEvent[],
           messages: [] as Array<{ role: string; text: string }>,
@@ -338,7 +340,7 @@ export function createAssistantPanel(
       },
       template: `
         <div class="bcs-shell">
-          <div class="bcs-topbar"><header class="bcs-header" role="banner"><div class="bcs-brand"><span class="material-icons">smart_toy</span><div><strong>Codex Studio</strong><small>{{ projectName }}</small></div></div><div class="bcs-header-actions"><button title="New conversation" aria-label="New conversation" @click="newChat"><span class="material-icons">add_comment</span></button><button title="Connection settings" aria-label="Connection settings" @click="configure"><span class="material-icons">settings</span></button></div></header>
+          <div class="bcs-topbar"><header class="bcs-header" role="banner"><div class="bcs-brand"><span class="material-icons">smart_toy</span><div><strong>Codex Studio <em>v{{ studioVersion }}</em></strong><small>{{ projectName }}</small></div></div><div class="bcs-header-actions"><button title="New conversation" aria-label="New conversation" @click="newChat"><span class="material-icons">add_comment</span></button><button title="Connection settings" aria-label="Connection settings" @click="configure"><span class="material-icons">settings</span></button></div></header>
           <div class="bcs-status" :class="{offline:!connected}" role="status" aria-live="polite"><span></span>{{ connected ? (working ? 'Codex is working' : 'MCP connected') : 'Bridge offline' }}</div></div>
           <main class="bcs-timeline">
             <div v-if="!messages.length" class="bcs-welcome"><span class="material-icons">auto_awesome</span><h3>Design directly in Blockbench</h3><p>Describe a change, attach the viewport, or select model parts. The assistant can inspect, draft, validate, and apply through the MCP bridge.</p><div><button @click="prompt='Inspect my selection and suggest improvements'">Inspect selection</button><button @click="prompt='Make these parts form a connected chain'">Connect selection</button><button @click="capture">Attach viewport</button></div></div>
