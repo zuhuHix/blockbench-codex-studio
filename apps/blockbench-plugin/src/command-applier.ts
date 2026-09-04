@@ -9,8 +9,16 @@ function isStructural(operation: DraftOperation): boolean {
   return (
     operation.kind === "create_cube" ||
     operation.kind === "create_group" ||
-    operation.kind === "delete_cube"
+    operation.kind === "delete_cube" ||
+    operation.kind === "delete_group" ||
+    operation.kind === "reparent_cube"
   );
+}
+
+function findGroup(groupId: string): BlockbenchNode {
+  const group = Group.all.find((candidate) => candidate.uuid === groupId);
+  if (group === undefined) throw new Error(`Group ${groupId} is unavailable.`);
+  return group;
 }
 
 function findCube(elementId: string): BlockbenchNode {
@@ -33,10 +41,37 @@ function parentIdOf(node: BlockbenchNode): string {
 function checkUnchanged(cube: BlockbenchNode, operation: DraftOperation): void {
   if (operation.kind === "create_cube" || operation.kind === "create_group")
     return;
+  if (
+    operation.kind === "delete_group" ||
+    operation.kind === "set_group_origin"
+  ) {
+    if (cube.name !== operation.name)
+      throw new Error(
+        `Group ${operation.groupId} changed before the command was applied.`,
+      );
+    if (operation.kind === "delete_group") {
+      if (parentIdOf(cube) !== operation.expectedParentGroupId)
+        throw new Error(
+          `Group ${operation.groupId} changed before the command was applied.`,
+        );
+      if ((cube.children ?? []).length > 0)
+        throw new Error(
+          `Group ${operation.name} is no longer empty and will not be deleted.`,
+        );
+    } else if (
+      JSON.stringify(cube.origin ?? [0, 0, 0]) !==
+      JSON.stringify(operation.from)
+    )
+      throw new Error(
+        `Group ${operation.groupId} changed before the command was applied.`,
+      );
+    return;
+  }
   if (parentIdOf(cube) !== operation.expectedParentGroupId)
     throw new Error(
       `Cube ${operation.elementId} changed before the command was applied.`,
     );
+  if (operation.kind === "reparent_cube") return;
   const stale =
     operation.kind === "set_face_uv"
       ? JSON.stringify(
@@ -142,6 +177,18 @@ export function applyCommand(command: BridgeCommand): void {
   for (const operation of command.operations) {
     if (operation.kind === "create_group" || operation.kind === "create_cube")
       continue;
+    // Group ops address a group the draft did not create, so they resolve
+    // against Group.all rather than the cube lookup.
+    if (
+      operation.kind === "delete_group" ||
+      operation.kind === "set_group_origin"
+    ) {
+      if (nodes.has(operation.groupId)) continue;
+      const group = findGroup(operation.groupId);
+      checkUnchanged(group, operation);
+      nodes.set(operation.groupId, group);
+      continue;
+    }
     if (pending.has(operation.elementId) || nodes.has(operation.elementId))
       continue;
     const cube = findCube(operation.elementId);
@@ -149,7 +196,7 @@ export function applyCommand(command: BridgeCommand): void {
     nodes.set(operation.elementId, cube);
   }
 
-  const existing = [...nodes.values()];
+  const existing = [...nodes.values()].filter((node) => node.type !== "group");
   const touched = new Set(existing);
   Undo.initEdit({
     elements: existing,
@@ -184,6 +231,21 @@ export function applyCommand(command: BridgeCommand): void {
         touched.add(cube);
         continue;
       }
+      if (
+        operation.kind === "delete_group" ||
+        operation.kind === "set_group_origin"
+      ) {
+        const group = nodes.get(operation.groupId);
+        if (group === undefined)
+          throw new Error(`Group ${operation.groupId} is unavailable.`);
+        if (operation.kind === "delete_group") {
+          group.remove?.();
+          nodes.delete(operation.groupId);
+        } else {
+          group.origin = [...operation.to];
+        }
+        continue;
+      }
       const cube = nodes.get(operation.elementId);
       if (cube === undefined)
         throw new Error(`Cube ${operation.elementId} is unavailable.`);
@@ -195,6 +257,10 @@ export function applyCommand(command: BridgeCommand): void {
           break;
         case "rename_cube":
           cube.name = operation.to;
+          break;
+        case "reparent_cube":
+          cube.addTo?.(resolveParent(nodes, operation.to));
+          touched.add(cube);
           break;
         case "delete_cube":
           cube.remove?.();

@@ -2,6 +2,7 @@ interface OutlineSnapshotNode {
   readonly id: string;
   readonly name: string;
   readonly type: "group" | "cube" | "mesh" | "other";
+  readonly origin?: readonly number[];
   readonly children: readonly OutlineSnapshotNode[];
 }
 
@@ -18,10 +19,15 @@ function serializeOutline(node: BlockbenchNode): OutlineSnapshotNode {
     node.type === "group" || node.type === "cube" || node.type === "mesh"
       ? node.type
       : "other";
+  // Group pivots drive rotation, so they are published: without them nothing
+  // outside Blockbench can read or safely guard a change to an origin.
   return {
     id: node.uuid,
     name: node.name,
     type,
+    ...(type === "group" && node.origin !== undefined
+      ? { origin: [...node.origin] }
+      : {}),
     children: (node.children ?? []).map(serializeOutline),
   };
 }

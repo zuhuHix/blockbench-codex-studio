@@ -6,6 +6,7 @@ interface BlockbenchNode {
   readonly parent?: BlockbenchNode | "root";
   from?: number[];
   to?: number[];
+  origin?: number[];
   init?(): BlockbenchNode;
   addTo?(parent: BlockbenchNode | undefined): BlockbenchNode;
   remove?(): void;

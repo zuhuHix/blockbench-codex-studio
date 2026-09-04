@@ -65,6 +65,93 @@ function collectGroupIds(
   return into;
 }
 
+interface ProjectedGroup {
+  readonly name: string;
+  readonly origin: readonly [number, number, number];
+  readonly parentGroupId: GroupId;
+  readonly isNew: boolean;
+}
+
+function findOutlineGroup(
+  nodes: readonly OutlineNode[],
+  groupId: string,
+  parentGroupId: string,
+): { node: OutlineNode; parentGroupId: string } | undefined {
+  for (const node of nodes) {
+    if (node.type === "group" && node.id === groupId)
+      return { node, parentGroupId };
+    const found = findOutlineGroup(node.children, groupId, node.id);
+    if (found !== undefined) return found;
+  }
+  return undefined;
+}
+
+/**
+ * The group as this draft will leave it, mirroring `projectCube` so a group the
+ * same draft created can be re-pivoted or removed before the draft is committed.
+ */
+function projectGroup(
+  snapshot: BlockbenchSnapshot,
+  operations: readonly DraftOperation[],
+  groupId: string,
+): ProjectedGroup | undefined {
+  const live = findOutlineGroup(snapshot.outline, groupId, "root");
+  let state: ProjectedGroup | undefined =
+    live === undefined
+      ? undefined
+      : {
+          name: live.node.name,
+          origin: live.node.origin ?? [0, 0, 0],
+          parentGroupId: live.parentGroupId as GroupId,
+          isNew: false,
+        };
+  for (const operation of operations) {
+    if (operation.kind === "create_group" && operation.groupId === groupId) {
+      state = {
+        name: operation.name,
+        origin: operation.origin,
+        parentGroupId: operation.parentGroupId,
+        isNew: true,
+      };
+      continue;
+    }
+    if (state === undefined) continue;
+    if (operation.kind === "delete_group" && operation.groupId === groupId)
+      state = undefined;
+    else if (
+      operation.kind === "set_group_origin" &&
+      operation.groupId === groupId
+    )
+      state = { ...state, origin: operation.to };
+  }
+  return state;
+}
+
+/** Ids of every cube and group the draft will leave parented to `groupId`. */
+function projectGroupChildren(
+  snapshot: BlockbenchSnapshot,
+  operations: readonly DraftOperation[],
+  groupId: string,
+): readonly string[] {
+  const cubeIds = new Set(snapshot.elements.map((element) => element.id));
+  for (const operation of operations)
+    if (operation.kind === "create_cube") cubeIds.add(operation.elementId);
+  const children: string[] = [];
+  for (const cubeId of cubeIds)
+    if (projectCube(snapshot, operations, cubeId)?.parentGroupId === groupId)
+      children.push(cubeId);
+  const groupIds = collectGroupIds(snapshot.outline, new Set());
+  for (const operation of operations)
+    if (operation.kind === "create_group") groupIds.add(operation.groupId);
+  for (const candidate of groupIds)
+    if (
+      candidate !== groupId &&
+      projectGroup(snapshot, operations, candidate)?.parentGroupId === groupId
+    )
+      children.push(candidate);
+  return children;
+}
+
 function projectCube(
   snapshot: BlockbenchSnapshot,
   operations: readonly DraftOperation[],
@@ -84,7 +171,12 @@ function projectCube(
           isNew: false,
         };
   for (const operation of operations) {
-    if (operation.kind === "create_group") continue;
+    if (
+      operation.kind === "create_group" ||
+      operation.kind === "delete_group" ||
+      operation.kind === "set_group_origin"
+    )
+      continue;
     if (operation.elementId !== elementId) continue;
     if (operation.kind === "create_cube") {
       state = {
@@ -107,6 +199,9 @@ function projectCube(
         break;
       case "rename_cube":
         state = { ...state, name: operation.to };
+        break;
+      case "reparent_cube":
+        state = { ...state, parentGroupId: operation.to };
         break;
       case "set_face_uv":
         state =
@@ -196,6 +291,36 @@ export class DraftStore {
         applied.push(operation);
         continue;
       }
+      if (
+        operation.kind === "delete_group" ||
+        operation.kind === "set_group_origin"
+      ) {
+        const group = projectGroup(snapshot, applied, operation.groupId);
+        if (group === undefined)
+          errors.push(`Group ${operation.groupId} no longer exists.`);
+        else if (group.name !== operation.name)
+          errors.push(`Group ${operation.groupId} was renamed after drafting.`);
+        else if (operation.kind === "delete_group") {
+          if (group.parentGroupId !== operation.expectedParentGroupId)
+            errors.push(`Group ${operation.groupId} changed parent groups.`);
+          const children = projectGroupChildren(
+            snapshot,
+            applied,
+            operation.groupId,
+          );
+          if (children.length > 0)
+            errors.push(
+              `Group ${operation.name} is no longer empty and will not be deleted.`,
+            );
+        } else if (!sameVector(group.origin, operation.from))
+          errors.push(
+            `Group ${operation.groupId} origin changed after drafting.`,
+          );
+        if (operation.kind === "delete_group")
+          groupIds.delete(operation.groupId);
+        applied.push(operation);
+        continue;
+      }
       const before = projectCube(snapshot, applied, operation.elementId);
       applied.push(operation);
       if (operation.kind === "create_cube") {
@@ -249,6 +374,12 @@ export class DraftStore {
           if (before.name !== operation.from)
             errors.push(
               `Cube ${operation.elementId} was renamed after drafting.`,
+            );
+          break;
+        case "reparent_cube":
+          if (!groupIds.has(operation.to))
+            errors.push(
+              `Group ${operation.to} no longer exists for cube ${operation.elementId}.`,
             );
           break;
         case "set_face_uv":
@@ -310,10 +441,11 @@ export class DraftStore {
     draft: DraftRecord,
     elementId: string,
     action: string,
+    allowRoot = false,
   ): ProjectedCube {
     const cube = projectCube(snapshot, draft.summary.operations, elementId);
     if (cube === undefined) throw new Error("Cube element was not found.");
-    if (!cube.isNew && cube.parentGroupId === "root")
+    if (!allowRoot && !cube.isNew && cube.parentGroupId === "root")
       throw new Error(
         `Root-level cubes cannot be ${action} by the safe draft tool.`,
       );
@@ -326,8 +458,10 @@ export class DraftStore {
     groupId: string,
   ): GroupId {
     const groupIds = collectGroupIds(snapshot.outline, new Set(["root"]));
-    for (const operation of draft.summary.operations)
+    for (const operation of draft.summary.operations) {
       if (operation.kind === "create_group") groupIds.add(operation.groupId);
+      if (operation.kind === "delete_group") groupIds.delete(operation.groupId);
+    }
     if (!groupIds.has(groupId))
       throw new Error(`Group ${groupId} was not found in the outline.`);
     return groupId as GroupId;
@@ -358,6 +492,98 @@ export class DraftStore {
       origin: input.origin ?? [0, 0, 0],
     });
     return { ...summary, groupId };
+  }
+
+  #requireProjectedGroup(
+    snapshot: BlockbenchSnapshot,
+    draft: DraftRecord,
+    groupId: string,
+  ): ProjectedGroup {
+    const group = projectGroup(snapshot, draft.summary.operations, groupId);
+    if (group === undefined)
+      throw new Error(`Group ${groupId} was not found in the outline.`);
+    return group;
+  }
+
+  /**
+   * Stage the removal of an empty group. Emptiness is required rather than
+   * cascading, so retiring a container can never silently take cubes with it;
+   * reparent or delete the children first.
+   */
+  deleteGroup(
+    snapshot: BlockbenchSnapshot,
+    transactionId: TransactionId,
+    groupId: string,
+  ): DraftSummary {
+    const draft = this.#requireDraft(snapshot, transactionId);
+    if (groupId === "root")
+      throw new Error("The root group cannot be deleted.");
+    const group = this.#requireProjectedGroup(snapshot, draft, groupId);
+    const children = projectGroupChildren(
+      snapshot,
+      draft.summary.operations,
+      groupId,
+    );
+    if (children.length > 0)
+      throw new Error(
+        `Group ${group.name} still holds ${children.length} child node(s); empty it before deleting.`,
+      );
+    return this.#stage(draft, {
+      kind: "delete_group",
+      groupId,
+      name: group.name,
+      expectedParentGroupId: group.parentGroupId,
+    });
+  }
+
+  /** Stage a new pivot for an existing group. */
+  setGroupOrigin(
+    snapshot: BlockbenchSnapshot,
+    transactionId: TransactionId,
+    groupId: string,
+    origin: readonly [number, number, number],
+  ): DraftSummary {
+    const draft = this.#requireDraft(snapshot, transactionId);
+    if (groupId === "root")
+      throw new Error("The root group has no editable origin.");
+    const group = this.#requireProjectedGroup(snapshot, draft, groupId);
+    if (sameVector(group.origin, origin))
+      throw new Error("The group already carries that origin.");
+    return this.#stage(draft, {
+      kind: "set_group_origin",
+      groupId,
+      name: group.name,
+      from: group.origin,
+      to: origin,
+    });
+  }
+
+  /** Stage a move of an existing cube into another group. */
+  reparentCube(
+    snapshot: BlockbenchSnapshot,
+    transactionId: TransactionId,
+    elementId: string,
+    parentGroupId: string,
+  ): DraftSummary {
+    const draft = this.#requireDraft(snapshot, transactionId);
+    // Root-level cubes are allowed as the source here: pulling a stray cube
+    // under a group is exactly what this tool exists to do.
+    const cube = this.#requireCube(
+      snapshot,
+      draft,
+      elementId,
+      "reparented",
+      true,
+    );
+    const to = this.#requireGroup(snapshot, draft, parentGroupId);
+    if (cube.parentGroupId === to)
+      throw new Error("The cube already lives in that group.");
+    return this.#stage(draft, {
+      kind: "reparent_cube",
+      elementId,
+      expectedParentGroupId: cube.parentGroupId,
+      to,
+    });
   }
 
   /** Stage a new cube; returns the summary plus the id the plugin will use. */

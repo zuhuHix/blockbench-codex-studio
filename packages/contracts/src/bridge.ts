@@ -5,6 +5,7 @@ import {
   cubeElementSchema,
   elementIdSchema,
   groupIdSchema,
+  vector3Schema,
 } from "./scene.js";
 
 export const outlineNodeSchema: z.ZodType<OutlineNode> = z.lazy(() =>
@@ -12,6 +13,8 @@ export const outlineNodeSchema: z.ZodType<OutlineNode> = z.lazy(() =>
     id: z.union([groupIdSchema, elementIdSchema]),
     name: z.string().min(1),
     type: z.enum(["group", "cube", "mesh", "other"]),
+    /** Groups only: the pivot the group rotates around. */
+    origin: vector3Schema.optional(),
     children: z.array(outlineNodeSchema).default([]),
   }),
 );
@@ -20,6 +23,7 @@ export interface OutlineNode {
   readonly id: string;
   readonly name: string;
   readonly type: "group" | "cube" | "mesh" | "other";
+  readonly origin?: readonly [number, number, number] | undefined;
   readonly children: readonly OutlineNode[];
 }
 
