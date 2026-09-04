@@ -539,6 +539,69 @@ export function createMcpServer(
   );
 
   server.registerTool(
+    "delete_group",
+    {
+      description:
+        "Stage the removal of an empty outliner group. Reparent or delete its children first; a group that still holds nodes is refused rather than cascaded.",
+      annotations: draftAnnotations,
+      inputSchema: {
+        transactionId: transactionIdSchema,
+        groupId: z.string().min(1),
+      },
+    },
+    ({ transactionId, groupId }) =>
+      jsonContent(
+        drafts.deleteGroup(requireSnapshot(store), transactionId, groupId),
+      ),
+  );
+
+  server.registerTool(
+    "set_group_origin",
+    {
+      description:
+        "Stage a new pivot (origin) for an existing group, so a group that was created with the wrong rotation point can be corrected in place.",
+      annotations: draftAnnotations,
+      inputSchema: {
+        transactionId: transactionIdSchema,
+        groupId: z.string().min(1),
+        origin: z.tuple([z.number(), z.number(), z.number()]),
+      },
+    },
+    ({ transactionId, groupId, origin }) =>
+      jsonContent(
+        drafts.setGroupOrigin(
+          requireSnapshot(store),
+          transactionId,
+          groupId,
+          origin,
+        ),
+      ),
+  );
+
+  server.registerTool(
+    "reparent_cube",
+    {
+      description:
+        "Stage a move of an existing cube into another group. Bounds and UVs are untouched, so cubes can be regrouped without rebuilding them.",
+      annotations: draftAnnotations,
+      inputSchema: {
+        transactionId: transactionIdSchema,
+        elementId: z.string().min(1),
+        parentGroupId: z.string().min(1),
+      },
+    },
+    ({ transactionId, elementId, parentGroupId }) =>
+      jsonContent(
+        drafts.reparentCube(
+          requireSnapshot(store),
+          transactionId,
+          elementId,
+          parentGroupId,
+        ),
+      ),
+  );
+
+  server.registerTool(
     "create_cube",
     {
       description:

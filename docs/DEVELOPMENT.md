@@ -211,6 +211,29 @@ Other polish in the same pass:
 - `Ask before applying`, the MCP-events disclosure, and the auto-refine settings are remembered in `localStorage` between sessions. Direct apply is the default, while enabling `Ask before applying` requires a separate approval message. Blockbench itself remembers the panel size and dock state.
 - An **Auto-refine** toggle with a 1-4 pass selector sits beside `Ask before applying`. It is off by default; when on, the outgoing prompt instructs the assistant to run the bounded refinement loop and report why it stopped. The panel's Stop button ends any active run as `stopped-by-user`.
 
+## Group restructuring
+
+Groups could previously only be created, so a group built with the wrong pivot
+could not be corrected and an obsolete one could not be retired. Three draft
+tools close that gap:
+
+- `set_group_origin` re-pivots an existing group. Group origins are now
+  published in the `list_outline` snapshot, which is what makes the change
+  guardable: the operation records the origin it observed and is rejected at
+  commit if the group has moved since.
+- `reparent_cube` moves an existing cube between groups without touching its
+  bounds or UVs. Cubes have no children, so this can never form a cycle, and it
+  is the one draft tool that accepts a root-level cube as its source, since
+  pulling a stray cube under a group is the point.
+- `delete_group` removes a group that is empty. Emptiness is required rather
+  than cascaded, so retiring a container can never silently take cubes with it;
+  reparent or delete the children first. Emptiness is re-checked against the
+  live scene at apply time, not just at draft time.
+
+All three stage into the ordinary draft, so emptying a group and deleting it
+land as one undoable Blockbench step, and a group the same draft created can be
+re-pivoted or retired before the draft is committed.
+
 ## Workspace map
 
 - `apps/blockbench-plugin`: in-process Blockbench adapter and UI

@@ -71,6 +71,38 @@ export const deleteCubeOperationSchema = z.object({
   expectedParentGroupId: groupIdSchema,
 });
 
+/**
+ * Structural group edits. A group is addressed by `groupId` rather than
+ * `elementId`, and each carries the state the draft observed so a stale command
+ * fails loudly instead of overwriting newer hand edits.
+ */
+export const deleteGroupOperationSchema = z.object({
+  kind: z.literal("delete_group"),
+  groupId: groupIdSchema,
+  name: z.string().min(1),
+  expectedParentGroupId: groupIdSchema,
+});
+
+export const setGroupOriginOperationSchema = z.object({
+  kind: z.literal("set_group_origin"),
+  groupId: groupIdSchema,
+  name: z.string().min(1),
+  from: vector3Schema,
+  to: vector3Schema,
+});
+
+/**
+ * Moves an existing cube between groups. Cubes have no children, so this can
+ * never introduce a cycle; the bounds stay untouched because Blockbench cube
+ * coordinates are already model-space.
+ */
+export const reparentCubeOperationSchema = z.object({
+  kind: z.literal("reparent_cube"),
+  elementId: elementIdSchema,
+  expectedParentGroupId: groupIdSchema,
+  to: groupIdSchema,
+});
+
 export const renameCubeOperationSchema = z.object({
   kind: z.literal("rename_cube"),
   elementId: elementIdSchema,
@@ -87,6 +119,9 @@ export const draftOperationSchema = z.discriminatedUnion("kind", [
   resizeCubeOperationSchema,
   deleteCubeOperationSchema,
   renameCubeOperationSchema,
+  deleteGroupOperationSchema,
+  setGroupOriginOperationSchema,
+  reparentCubeOperationSchema,
 ]);
 
 export const draftSummarySchema = z.object({
@@ -172,6 +207,11 @@ export type CreateCubeOperation = z.infer<typeof createCubeOperationSchema>;
 export type ResizeCubeOperation = z.infer<typeof resizeCubeOperationSchema>;
 export type DeleteCubeOperation = z.infer<typeof deleteCubeOperationSchema>;
 export type RenameCubeOperation = z.infer<typeof renameCubeOperationSchema>;
+export type DeleteGroupOperation = z.infer<typeof deleteGroupOperationSchema>;
+export type SetGroupOriginOperation = z.infer<
+  typeof setGroupOriginOperationSchema
+>;
+export type ReparentCubeOperation = z.infer<typeof reparentCubeOperationSchema>;
 export type MoveCubeOperation = z.infer<typeof moveCubeOperationSchema>;
 export type SetFaceUvOperation = z.infer<typeof setFaceUvOperationSchema>;
 export type TransactionId = z.infer<typeof transactionIdSchema>;
