@@ -235,7 +235,7 @@ export function createMcpServer(
 ): McpServer {
   const server = new McpServer({
     name: "blockbench-codex-studio",
-    version: "0.1.0",
+    version: "0.2.0",
   });
 
   // Every tool below is logged the same way, so the wrapper lives here rather

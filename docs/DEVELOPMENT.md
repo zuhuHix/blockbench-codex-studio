@@ -208,8 +208,8 @@ Other polish in the same pass:
 
 - Assistant messages longer than 700 characters collapse to their first line with a `Show full message` toggle, expanded per message.
 - Every icon-only control carries an `aria-label` as well as a tooltip, the status line is an `aria-live` region, and `:focus-visible` draws an accent outline so keyboard navigation is visible throughout.
-- `Preview first`, the MCP-events disclosure, and the auto-refine settings are remembered in `localStorage` between sessions; Blockbench itself remembers the panel size and dock state.
-- An **Auto-refine** toggle with a 1-4 pass selector sits beside `Preview first`. It is off by default; when on, the outgoing prompt instructs the assistant to run the bounded refinement loop and report why it stopped. The panel's Stop button ends any active run as `stopped-by-user`.
+- `Ask before applying`, the MCP-events disclosure, and the auto-refine settings are remembered in `localStorage` between sessions. Direct apply is the default, while enabling `Ask before applying` requires a separate approval message. Blockbench itself remembers the panel size and dock state.
+- An **Auto-refine** toggle with a 1-4 pass selector sits beside `Ask before applying`. It is off by default; when on, the outgoing prompt instructs the assistant to run the bounded refinement loop and report why it stopped. The panel's Stop button ends any active run as `stopped-by-user`.
 
 ## Workspace map
 
